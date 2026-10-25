@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
   Bookmark, CalendarDays, Check, ChevronLeft, ChevronRight, ExternalLink, Heart,
-  LayoutList, MapPin, Settings2, Sparkles, Sunrise, X, Download, Upload,
+  LayoutList, MapPin, Settings2, Sparkles, X, Download, Upload,
   RotateCcw, SlidersHorizontal,
 } from "lucide-react";
 import { useOpenWindow } from "./lib/useOpenWindow";
@@ -180,10 +180,9 @@ function App() {
         <section className="intro">
           <div>
             <div className="eyebrow">Your Bay Area event window</div>
-            <h1>Make room for<br className="desktop-break" /> something interesting.</h1>
-            <p>Good things are happening nearby. See what fits around the life you already have.</p>
+            <h1>Make room for something interesting.</h1>
+            <p>Find nearby events that fit your interests and schedule.</p>
           </div>
-          <div className="intro-aside"><span className="sun-mark"><Sunrise size={16} /></span><span>Curated for your next {model.preferences.dateHorizonDays} days</span></div>
         </section>
 
         <div className="workspace">
@@ -211,9 +210,7 @@ function App() {
             </section>
             <section className="filter-section">
               <div className="filter-label">Calendar context <small>{model.busyOrigin}</small></div>
-              <p className="filter-note" style={{ marginTop: 0 }}>Every conflict stays in view unless you choose to filter it out. Imported calendar times remain local to this device.</p>
             </section>
-            <button className="button secondary" style={{ width: "100%" }} onClick={() => setPreferencesOpen(true)}><Settings2 size={14} /> Edit your defaults</button>
           </aside>
 
           <section className="main-panel" aria-label="Event opportunities">
@@ -235,11 +232,11 @@ function App() {
               filteredEvents.length ? <div className="events-list">
                 {dateGroups.map(([date, events]) => (
                   <section className="date-group" key={date}>
-                    <h2 className="date-heading">{formatLongDate(safeDate(events[0].start))}<span>{events.length} {events.length === 1 ? "possibility" : "possibilities"}</span></h2>
+                    <h2 className="date-heading">{formatLongDate(safeDate(events[0].start))}{events.length > 1 && <span>{events.length} events</span>}</h2>
                     {events.map((event) => <EventRow key={event.id} event={event} availability={model.availabilityByEvent[event.id] ?? "unknown"} saved={model.savedEventIds.includes(event.id)} onSave={() => { model.saveEvent(event.id); showToast(model.savedEventIds.includes(event.id) ? "Removed from saved events" : "Saved for later"); }} onDetails={() => setActiveEvent(event)} />)}
                   </section>
                 ))}
-                <div className="footer-note"><span>Times shown in each event’s local time zone.</span><span>Every event is a suggestion, never a calendar booking.</span></div>
+                <div className="footer-note"><span>Local times · Suggestions, not bookings.</span></div>
               </div> : <EmptyState savedOnly={savedOnly} onReset={() => { clearFilters(); }} onPreferences={() => setPreferencesOpen(true)} /> 
             ) : (
               <CalendarView
@@ -277,16 +274,15 @@ function EventRow({ event, availability, saved, onSave, onDetails }: {
         <h3 className="event-title">{event.title}</h3>
         <div className="event-sub"><MapPin size={11} style={{ verticalAlign: "-2px", marginRight: 3 }} />{event.city} · {event.venue}</div>
         <div className="event-tags">
-          {event.topics.map((topic) => <span className="mini-tag topic" key={topic}>{topic}</span>)}
-          {event.formats.map((format) => <span className="mini-tag" key={format}>{format}</span>)}
-          <span className="mini-tag">Demo source</span>
+          {event.topics[0] && <span className="mini-tag topic">{event.topics[0]}</span>}
+          {event.formats[0] && <span className="mini-tag">{event.formats[0]}</span>}
         </div>
       </div>
       <div className="event-actions">
         <span className={`availability ${availability}`}>{availabilityLabel[availability]}</span>
         <button className={`save-btn ${saved ? "saved" : ""}`} onClick={onSave} aria-label={saved ? `Remove ${event.title} from saved` : `Save ${event.title}`} aria-pressed={saved}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /></button>
         <button className="details-btn" onClick={onDetails}>Details</button>
-        <a className="list-luma-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={11} /></a>
+        {event.source === "Luma" && event.lumaUrl !== "https://lu.ma" && <a className="list-luma-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={11} /></a>}
       </div>
     </article>
   );
@@ -440,8 +436,8 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, o
     )}
     <p className="calendar-foot">
       {mode === "month"
-        ? "Select a date to open day view, or select an event for details. Existing calendar commitments are marked without showing private event details."
-        : `Showing ${mode === "week" ? "this week" : "this day"} only. Use the arrows to navigate; Today returns to the current ${mode}. Select a suggestion for details. Nothing is added automatically.`}
+        ? "Select a date for Day view, or select an event for details."
+        : `Showing ${mode === "week" ? "this week" : "this day"}. Select an event for details; nothing is added automatically.`}
     </p>
   </div>;
 }
@@ -451,22 +447,24 @@ function EventModal({ event, availability, saved, onSave, onClose }: {
 }) {
   return <div className="modal-backdrop" onMouseDown={(eventClick) => { if (eventClick.target === eventClick.currentTarget) onClose(); }}>
     <section className="modal" role="dialog" aria-modal="true" aria-labelledby="event-dialog-title">
-      <div className="modal-header"><div><div className="eyebrow">A possibility nearby · Demo</div><h2 id="event-dialog-title">{event.title}</h2></div><button className="modal-close" aria-label="Close details" onClick={onClose}><X size={17} /></button></div>
+      <div className="modal-header"><div><div className="eyebrow">Event details</div><h2 id="event-dialog-title">{event.title}</h2></div><button className="modal-close" aria-label="Close details" onClick={onClose}><X size={17} /></button></div>
       <div className="modal-content">
         <div className="detail-meta">
           <div className="meta-block"><small>When</small><strong>{formatLongDate(safeDate(event.start))}<br />{eventClock(event)} – {eventClock(event, true).replace(/ [A-Z]{2,5}$/, "")}</strong></div>
           <div className="meta-block"><small>Where</small><strong>{event.venue}<br />{event.city}</strong></div>
-          <div className="meta-block"><small>Calendar fit</small><strong className={`availability ${availability}`}>{availabilityLabel[availability]}</strong></div>
-          <div className="meta-block"><small>Source</small><strong>Demo listing</strong></div>
         </div>
+        <div className="detail-fit"><span>Calendar fit</span><strong className={`availability ${availability}`}>{availabilityLabel[availability]}</strong></div>
         <p className="detail-description">{event.description}</p>
-        <div className="detail-tag-list">{event.topics.map((topic) => <span className="mini-tag topic" key={topic}>{topic}</span>)}{event.formats.map((format) => <span className="mini-tag" key={format}>{format}</span>)}</div>
+        <div className="detail-tag-list">
+          {event.topics[0] && <span className="mini-tag topic">{event.topics[0]}</span>}
+          {event.formats[0] && <span className="mini-tag">{event.formats[0]}</span>}
+        </div>
         <div className="modal-actions">
           <button className="button primary" onClick={() => downloadIcs(event)}><Download size={14} /> Download .ics</button>
           <button className="button secondary" onClick={onSave}><Bookmark size={14} fill={saved ? "currentColor" : "none"} /> {saved ? "Saved" : "Save event"}</button>
-          <a className="external-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={13} /></a>
+          {event.source === "Luma" && event.lumaUrl !== "https://lu.ma" && <a className="external-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={13} /></a>}
         </div>
-        <p className="filter-note" style={{ marginTop: 12 }}>Downloading an .ics file does not add anything automatically. Luma live search is disabled; this listing is demo data.</p>
+        <p className="filter-note" style={{ marginTop: 12 }}>Download the calendar file to add this event yourself.</p>
       </div>
     </section>
   </div>;
@@ -477,7 +475,6 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
   busyOrigin: string; onSave: (preferences: Preferences) => void; onClose: () => void;
   onImport: (file?: File) => Promise<void>; onClearImport: () => void;
 }) {
-  const [keywords, setKeywords] = useState(preferences.keywords.join(", "));
   const [cities, setCities] = useState(preferences.cities.join(", "));
   const [horizon, setHorizon] = useState(String(preferences.dateHorizonDays));
   const [topics, setTopics] = useState<Topic[]>(preferences.topics);
@@ -505,7 +502,6 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
     <section className="modal" role="dialog" aria-modal="true" aria-labelledby="preferences-title">
       <div className="modal-header"><div><div className="eyebrow">Make it yours</div><h2 id="preferences-title">Your preferences</h2></div><button className="modal-close" aria-label="Close preferences" onClick={onClose}><X size={17} /></button></div>
       <div className="modal-content">
-        <div className="form-field"><label htmlFor="keywords">Keywords you’re curious about</label><input id="keywords" value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="AI agents, climate tech" /><p className="help">Separate ideas with commas. Used as your saved discovery defaults.</p></div>
         <div className="form-field"><label htmlFor="cities">Cities</label><input id="cities" value={cities} onChange={(event) => setCities(event.target.value)} placeholder="San Francisco, Berkeley" /><p className="help">Leave empty to include every available Bay Area city.</p></div>
         <div className="form-field"><label htmlFor="horizon">Look ahead</label><select id="horizon" value={horizon} onChange={(event) => setHorizon(event.target.value)}>{Array.from({ length: 30 }, (_, index) => <option value={index + 1} key={index}>{index + 1} days</option>)}</select></div>
         <h3 className="pref-section-title">Optional topic defaults</h3>
@@ -527,7 +523,7 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
         <p className="filter-note">Calendar files are read on this device. Imported calendar times remain local and are never uploaded by this workspace.</p>
         <div className="modal-actions" style={{ marginTop: 19 }}>
           <button className="button primary" onClick={() => onSave({
-            keywords: keywords.split(",").map((value) => value.trim()).filter(Boolean),
+            keywords: preferences.keywords,
             cities: cities.split(",").map((value) => value.trim()).filter(Boolean),
             dateHorizonDays: Math.max(1, Math.min(30, Number(horizon) || 1)),
             topics, formats,
