@@ -41,12 +41,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px s
 .text-button:hover { background:#eee9f6;color:var(--forest-dark); }
 .icon-button { width:36px;height:36px;border:1px solid var(--line);background:#fafbf6;border-radius:10px;display:grid;place-items:center; }
 .icon-button:hover { background:#f6edc9;transform:translateY(-1px); }
-.page { max-width:1400px; margin:0 auto; padding:32px clamp(20px,5vw,76px) 64px; }
-.intro { display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:24px; }
+.page { max-width:1400px; margin:0 auto; padding:24px clamp(20px,5vw,76px) 64px; }
 .eyebrow { text-transform:uppercase;letter-spacing:.13em;font-size:10px;color:#73658e;font-weight:700; }
 h1,h2,h3,p { margin-top:0; }
-h1 { margin:7px 0 6px;font:500 clamp(32px,3.6vw,46px)/1.08 "Newsreader",serif;letter-spacing:-1px;color:#40316f; }
-.intro p { margin:0;color:#766f84;font-size:13px;line-height:1.5; }
 .workspace { display:grid;grid-template-columns:250px minmax(0,1fr);gap:22px;align-items:start; }
 .sidebar,.main-panel { border:1px solid var(--line);background:var(--card);border-radius:16px; }
 .sidebar { padding:16px 15px 13px;position:sticky;top:18px; }
@@ -204,10 +201,7 @@ h1 { margin:7px 0 6px;font:500 clamp(32px,3.6vw,46px)/1.08 "Newsreader",serif;le
  .source-pill {font-size:10px;padding:7px 9px}
  .top-actions {gap:4px}
  .text-button {font-size:11px;padding:8px}
-  .page {padding:24px 14px 48px}
-  .intro {align-items:flex-start;margin-bottom:18px}
-  h1 {font-size:34px;line-height:1.05}
-  .intro p {font-size:12px;max-width:300px}
+  .page {padding:18px 14px 48px}
  .sidebar {border-radius:13px}
  .filter-section {width:100%;display:block;padding:12px 0}
  .filter-section:nth-of-type(2n) {padding-left:0}

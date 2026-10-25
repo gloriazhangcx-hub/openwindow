@@ -12,6 +12,7 @@ import {
   navigateCalendarDate,
   type CalendarMode,
 } from "./lib/calendar-views";
+import { findNearestUpcomingSavedEvent } from "./lib/saved-events";
 import type { Availability, BusyInterval, EventItem, Format, Preferences, Topic } from "./types";
 import { FORMATS, TOPICS } from "./types";
 
@@ -136,6 +137,32 @@ function App() {
     );
   }, [filteredEvents, calendarDays]);
 
+  const saveEvent = (event: EventItem) => {
+    const wasSaved = model.savedEventIds.includes(event.id);
+    model.saveEvent(event.id);
+    if (!wasSaved && view === "calendar") {
+      const candidates = [
+        ...filteredEvents.filter((candidate) => candidate.id !== event.id),
+        event,
+      ];
+      const nearest = findNearestUpcomingSavedEvent(
+        candidates,
+        [...model.savedEventIds, event.id],
+      );
+      if (nearest) setCalendarDate(atCalendarNoon(safeDate(nearest.start)));
+    }
+    showToast(wasSaved ? "Removed from saved events" : "Saved for later");
+  };
+
+  const toggleSavedOnly = () => {
+    const nextSavedOnly = !savedOnly;
+    if (nextSavedOnly && view === "calendar") {
+      const nearest = findNearestUpcomingSavedEvent(filteredEvents, model.savedEventIds);
+      if (nearest) setCalendarDate(atCalendarNoon(safeDate(nearest.start)));
+    }
+    setSavedOnly(nextSavedOnly);
+  };
+
   const clearFilters = () => {
     setSelectedTopics([]);
     setSelectedFormats([]);
@@ -177,14 +204,6 @@ function App() {
       </header>
 
       <main className="page">
-        <section className="intro">
-          <div>
-            <div className="eyebrow">Your Bay Area event window</div>
-            <h1>Make room for something interesting.</h1>
-            <p>Find nearby events that fit your interests and schedule.</p>
-          </div>
-        </section>
-
         <div className="workspace">
           <aside className="sidebar" aria-label="Event filters">
             <div className="sidebar-head">
@@ -220,7 +239,7 @@ function App() {
                 <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "selected" : ""} onClick={openCalendar}><CalendarDays size={15} /> Calendar</button>
               </div>
               <div className="toolbar-right">
-                <button className={`saved-toggle ${savedOnly ? "active" : ""}`} aria-pressed={savedOnly} onClick={() => setSavedOnly(!savedOnly)}><Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> Saved <span>{model.savedEventIds.length}</span></button>
+                <button className={`saved-toggle ${savedOnly ? "active" : ""}`} aria-pressed={savedOnly} onClick={toggleSavedOnly}><Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> Saved <span>{model.savedEventIds.length}</span></button>
                 <span className="count-label">
                   {view === "calendar"
                     ? `${calendarEvents.length} ${calendarMode === "week" ? "this week" : calendarMode === "day" ? "in day" : "in month view"} · ${filteredEvents.length} total`
@@ -233,7 +252,7 @@ function App() {
                 {dateGroups.map(([date, events]) => (
                   <section className="date-group" key={date}>
                     <h2 className="date-heading">{formatLongDate(safeDate(events[0].start))}{events.length > 1 && <span>{events.length} events</span>}</h2>
-                    {events.map((event) => <EventRow key={event.id} event={event} availability={model.availabilityByEvent[event.id] ?? "unknown"} saved={model.savedEventIds.includes(event.id)} onSave={() => { model.saveEvent(event.id); showToast(model.savedEventIds.includes(event.id) ? "Removed from saved events" : "Saved for later"); }} onDetails={() => setActiveEvent(event)} />)}
+                    {events.map((event) => <EventRow key={event.id} event={event} availability={model.availabilityByEvent[event.id] ?? "unknown"} saved={model.savedEventIds.includes(event.id)} onSave={() => saveEvent(event)} onDetails={() => setActiveEvent(event)} />)}
                   </section>
                 ))}
                 <div className="footer-note"><span>Local times · Suggestions, not bookings.</span></div>
@@ -257,7 +276,7 @@ function App() {
         </div>
       </main>
 
-      {activeEvent && <EventModal event={activeEvent} availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"} saved={model.savedEventIds.includes(activeEvent.id)} onSave={() => { model.saveEvent(activeEvent.id); showToast(model.savedEventIds.includes(activeEvent.id) ? "Removed from saved events" : "Saved for later"); }} onClose={() => setActiveEvent(null)} />}
+      {activeEvent && <EventModal event={activeEvent} availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"} saved={model.savedEventIds.includes(activeEvent.id)} onSave={() => saveEvent(activeEvent)} onClose={() => setActiveEvent(null)} />}
       {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
       {toast && <div role="status" className="toast">{toast}</div>}
     </div>
