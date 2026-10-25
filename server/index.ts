@@ -1,9 +1,11 @@
 import express from "express";
+import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
 
 const app = express();
+const httpServer = createServer(app);
 const port = Number(process.env.PORT ?? 5000);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const maxPayloadBytes = 64 * 1024;
@@ -131,7 +133,7 @@ if (process.env.NODE_ENV === "production") {
 } else {
   const vite = await createViteServer({
     configFile: path.resolve(here, "../vite.config.ts"),
-    server: { middlewareMode: true },
+    server: { middlewareMode: true, hmr: { server: httpServer } },
     appType: "spa",
   });
   app.use(vite.middlewares);
@@ -148,6 +150,6 @@ app.use((error: unknown, _req: express.Request, res: express.Response, next: exp
   next(error);
 });
 
-app.listen(port, "0.0.0.0", () => {
+httpServer.listen(port, "0.0.0.0", () => {
   console.log(`OpenWindow running on port ${port} (${process.env.NODE_ENV ?? "development"})`);
 });
