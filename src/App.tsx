@@ -1,0 +1,434 @@
+import { useMemo, useRef, useState } from "react";
+import {
+  Bookmark, CalendarDays, Check, ChevronLeft, ChevronRight, ExternalLink, Heart,
+  LayoutList, MapPin, Settings2, Sparkles, Sunrise, X, Download, Upload,
+  RotateCcw, SlidersHorizontal,
+} from "lucide-react";
+import { useOpenWindow } from "./lib/useOpenWindow";
+import type { Availability, BusyInterval, EventItem, Format, Preferences, Topic } from "./types";
+import { FORMATS, TOPICS } from "./types";
+
+type View = "list" | "calendar";
+type AvailabilityFilter = "all" | Availability;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const fmtDate = (date: Date, options: Intl.DateTimeFormatOptions, zone = "America/Los_Angeles") =>
+  new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone }).format(date);
+const dayKey = (date: Date, zone = "America/Los_Angeles") =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const availabilityLabel: Record<Availability, string> = {
+  available: "Available", conflict: "Conflict", unknown: "Unknown",
+};
+const safeDate = (date: string) => new Date(date);
+
+function eventClock(event: EventItem, end = false) {
+  const value = fmtDate(safeDate(end ? event.end : event.start), { hour: "numeric", minute: "2-digit", timeZoneName: "short" }, event.timeZone);
+  return value;
+}
+
+function formatLongDate(date: Date) {
+  return fmtDate(date, { weekday: "long", month: "long", day: "numeric" });
+}
+
+function escapeIcs(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
+}
+
+function downloadIcs(event: EventItem) {
+  const stamp = (value: string) => new Date(value).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const body = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//OpenWindow//Event//EN", "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT", `UID:${event.id}@openwindow.local`, `DTSTAMP:${stamp(new Date().toISOString())}`,
+    `DTSTART:${stamp(event.start)}`, `DTEND:${stamp(event.end)}`, `SUMMARY:${escapeIcs(event.title)}`,
+    `DESCRIPTION:${escapeIcs(event.description)}`, `LOCATION:${escapeIcs(`${event.venue}, ${event.city}`)}`,
+    `URL:${event.lumaUrl}`, "END:VEVENT", "END:VCALENDAR",
+  ].join("\r\n");
+  const blob = new Blob([body], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${event.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.ics`;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+function weekStart(date: Date) {
+  const result = startOfDay(date);
+  result.setDate(result.getDate() - ((result.getDay() + 6) % 7));
+  result.setHours(12, 0, 0, 0);
+  return result;
+}
+
+function minuteInZone(date: Date, zone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  }).formatToParts(date);
+  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
+  return hour * 60 + minute;
+}
+
+function App() {
+  const model = useOpenWindow();
+  const [view, setView] = useState<View>("list");
+  const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
+  const [selectedFormats, setSelectedFormats] = useState<Format[]>(model.preferences.formats);
+  const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
+  const [savedOnly, setSavedOnly] = useState(false);
+  const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [week, setWeek] = useState(() => weekStart(new Date()));
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef<number | undefined>(undefined);
+
+  const showToast = (message: string) => {
+    setToast(message);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(""), 2600);
+  };
+
+  const toggleIn = <T,>(list: T[], item: T, setter: (next: T[]) => void) =>
+    setter(list.includes(item) ? list.filter((value) => value !== item) : [...list, item]);
+
+  const filteredEvents = useMemo(() => {
+    const now = Date.now();
+    return model.events.filter((event) => {
+      const start = Date.parse(event.start);
+      if (!Number.isFinite(start) || start < now - 60 * 60 * 1000 || start > now + model.preferences.dateHorizonDays * DAY_MS) return false;
+      const cityMatch = model.preferences.cities.length === 0 || model.preferences.cities.some((city) => event.city.toLowerCase().includes(city.toLowerCase()));
+      if (!cityMatch) return false;
+      if (selectedTopics.length && !selectedTopics.some((topic) => event.topics.includes(topic))) return false;
+      if (selectedFormats.length && !selectedFormats.some((format) => event.formats.includes(format))) return false;
+      if (availabilityFilter !== "all" && model.availabilityByEvent[event.id] !== availabilityFilter) return false;
+      if (savedOnly && !model.savedEventIds.includes(event.id)) return false;
+      return true;
+    }).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
+  }, [model.events, model.preferences, model.availabilityByEvent, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, savedOnly]);
+
+  const dateGroups = useMemo(() => {
+    const groups = new Map<string, EventItem[]>();
+    filteredEvents.forEach((event) => {
+      const key = dayKey(safeDate(event.start), event.timeZone);
+      groups.set(key, [...(groups.get(key) ?? []), event]);
+    });
+    return [...groups.entries()];
+  }, [filteredEvents]);
+
+  const clearFilters = () => {
+    setSelectedTopics([]);
+    setSelectedFormats([]);
+    setAvailabilityFilter("all");
+    setSavedOnly(false);
+  };
+
+  const onImport = async (file?: File) => {
+    if (!file) return;
+    try {
+      const parsed: unknown = JSON.parse(await file.text());
+      const count = model.importBusyIntervals(parsed);
+      showToast(`${count} calendar ${count === 1 ? "commitment" : "commitments"} imported locally`);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "That file could not be imported.");
+      throw error;
+    }
+  };
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <button className="brand" aria-label="OpenWindow home" onClick={() => { clearFilters(); setView("list"); }}>
+          <span className="brand-mark" aria-hidden="true" />
+          <span className="brand-name">openwindow</span>
+        </button>
+        <div className="top-actions">
+          <span className="source-pill" title="Events currently come from the local demo dataset">
+            <span className="source-dot" /> Demo mode
+          </span>
+          <button className="text-button" onClick={() => setPreferencesOpen(true)}><Settings2 size={16} /> Preferences</button>
+        </div>
+      </header>
+
+      <main className="page">
+        <section className="intro">
+          <div>
+            <div className="eyebrow">Your Bay Area event window</div>
+            <h1>Make room for<br className="desktop-break" /> something interesting.</h1>
+            <p>Good things are happening nearby. See what fits around the life you already have.</p>
+          </div>
+          <div className="intro-aside"><span className="sun-mark"><Sunrise size={16} /></span><span>Curated for your next {model.preferences.dateHorizonDays} days</span></div>
+        </section>
+
+        <div className="workspace">
+          <aside className="sidebar" aria-label="Event filters">
+            <div className="sidebar-head">
+              <div className="sidebar-title"><SlidersHorizontal size={14} style={{ verticalAlign: "-2px", marginRight: 7 }} /> Refine your window</div>
+              <button className="reset-button" onClick={clearFilters}>Reset</button>
+            </div>
+            <section className="filter-section">
+              <div className="filter-label">Topics <small>{selectedTopics.length ? `${selectedTopics.length} selected` : "choose any"}</small></div>
+              <div className="chips">{TOPICS.map((topic) => <button key={topic} className={`chip ${selectedTopics.includes(topic) ? "active" : ""}`} aria-pressed={selectedTopics.includes(topic)} onClick={() => toggleIn(selectedTopics, topic, setSelectedTopics)}>{topic}</button>)}</div>
+            </section>
+            <section className="filter-section">
+              <div className="filter-label">Format <small>{selectedFormats.length ? `${selectedFormats.length} selected` : "choose any"}</small></div>
+              <div className="chips">{FORMATS.map((format) => <button key={format} className={`chip ${selectedFormats.includes(format) ? "active" : ""}`} aria-pressed={selectedFormats.includes(format)} onClick={() => toggleIn(selectedFormats, format, setSelectedFormats)}>{format}</button>)}</div>
+            </section>
+            <section className="filter-section">
+              <label className="filter-label" htmlFor="availability-filter">Availability</label>
+              <select id="availability-filter" className="availability-select" value={availabilityFilter} onChange={(event) => setAvailabilityFilter(event.target.value as AvailabilityFilter)}>
+                <option value="all">All availability</option>
+                <option value="available">Available</option>
+                <option value="conflict">Conflicts</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </section>
+            <section className="filter-section">
+              <div className="filter-label">Calendar context <small>{model.busyOrigin}</small></div>
+              <p className="filter-note" style={{ marginTop: 0 }}>Every conflict stays in view unless you choose to filter it out. Imported calendar times remain local to this device.</p>
+            </section>
+            <button className="button secondary" style={{ width: "100%" }} onClick={() => setPreferencesOpen(true)}><Settings2 size={14} /> Edit your defaults</button>
+          </aside>
+
+          <section className="main-panel" aria-label="Event opportunities">
+            <div className="panel-toolbar">
+              <div className="view-switch" role="tablist" aria-label="Event view">
+                <button role="tab" aria-selected={view === "list"} className={view === "list" ? "selected" : ""} onClick={() => setView("list")}><LayoutList size={15} /> List</button>
+                <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "selected" : ""} onClick={() => setView("calendar")}><CalendarDays size={15} /> Calendar</button>
+              </div>
+              <div className="toolbar-right">
+                <button className={`saved-toggle ${savedOnly ? "active" : ""}`} aria-pressed={savedOnly} onClick={() => setSavedOnly(!savedOnly)}><Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> Saved <span>{model.savedEventIds.length}</span></button>
+                <span className="count-label">{filteredEvents.length} {filteredEvents.length === 1 ? "event" : "events"}</span>
+              </div>
+            </div>
+            {view === "list" ? (
+              filteredEvents.length ? <div className="events-list">
+                {dateGroups.map(([date, events]) => (
+                  <section className="date-group" key={date}>
+                    <h2 className="date-heading">{formatLongDate(safeDate(events[0].start))}<span>{events.length} {events.length === 1 ? "possibility" : "possibilities"}</span></h2>
+                    {events.map((event) => <EventRow key={event.id} event={event} availability={model.availabilityByEvent[event.id] ?? "unknown"} saved={model.savedEventIds.includes(event.id)} onSave={() => { model.saveEvent(event.id); showToast(model.savedEventIds.includes(event.id) ? "Removed from saved events" : "Saved for later"); }} onDetails={() => setActiveEvent(event)} />)}
+                  </section>
+                ))}
+                <div className="footer-note"><span>Times shown in each event’s local time zone.</span><span>Every event is a suggestion, never a calendar booking.</span></div>
+              </div> : <EmptyState savedOnly={savedOnly} onReset={() => { clearFilters(); }} onPreferences={() => setPreferencesOpen(true)} /> 
+            ) : (
+              <CalendarView week={week} events={filteredEvents} busyIntervals={model.busyIntervals} availability={model.availabilityByEvent} onWeek={(amount) => { const next = new Date(week); next.setDate(next.getDate() + amount * 7); setWeek(next); }} onToday={() => setWeek(weekStart(new Date()))} onEvent={setActiveEvent} />
+            )}
+          </section>
+        </div>
+      </main>
+
+      {activeEvent && <EventModal event={activeEvent} availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"} saved={model.savedEventIds.includes(activeEvent.id)} onSave={() => { model.saveEvent(activeEvent.id); showToast(model.savedEventIds.includes(activeEvent.id) ? "Removed from saved events" : "Saved for later"); }} onClose={() => setActiveEvent(null)} />}
+      {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
+      {toast && <div role="status" className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+function EventRow({ event, availability, saved, onSave, onDetails }: {
+  event: EventItem; availability: Availability; saved: boolean; onSave: () => void; onDetails: () => void;
+}) {
+  return (
+    <article className="event-row">
+      <div className="event-time">{eventClock(event)}<small>to {fmtDate(safeDate(event.end), { hour: "numeric", minute: "2-digit" }, event.timeZone)}</small></div>
+      <div className="event-main">
+        <h3 className="event-title">{event.title}</h3>
+        <div className="event-sub"><MapPin size={11} style={{ verticalAlign: "-2px", marginRight: 3 }} />{event.city} · {event.venue}</div>
+        <div className="event-tags">
+          {event.topics.map((topic) => <span className="mini-tag topic" key={topic}>{topic}</span>)}
+          {event.formats.map((format) => <span className="mini-tag" key={format}>{format}</span>)}
+          <span className="mini-tag">Demo source</span>
+        </div>
+      </div>
+      <div className="event-actions">
+        <span className={`availability ${availability}`}>{availabilityLabel[availability]}</span>
+        <button className={`save-btn ${saved ? "saved" : ""}`} onClick={onSave} aria-label={saved ? `Remove ${event.title} from saved` : `Save ${event.title}`} aria-pressed={saved}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /></button>
+        <button className="details-btn" onClick={onDetails}>Details</button>
+        <a className="list-luma-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={11} /></a>
+      </div>
+    </article>
+  );
+}
+
+function EmptyState({ savedOnly, onReset, onPreferences }: { savedOnly: boolean; onReset: () => void; onPreferences: () => void }) {
+  return <div className="empty-state">
+    <div><div className="empty-orbit"><Sparkles size={22} /></div>
+      <h3>{savedOnly ? "Your saved list is still open." : "A little quiet in this window."}</h3>
+      <p>{savedOnly ? "Save an event that catches your eye and it will be waiting here." : "Try a broader topic, or open your preferences to make room for more kinds of events."}</p>
+      {!savedOnly && <button className="button secondary" onClick={onPreferences}>Adjust preferences</button>}
+      {savedOnly && <button className="button secondary" onClick={onReset}>Show all events</button>}
+    </div>
+  </div>;
+}
+
+function CalendarView({ week, events, busyIntervals, availability, onWeek, onToday, onEvent }: {
+  week: Date; events: EventItem[]; busyIntervals: BusyInterval[] | null; availability: Record<string, Availability>;
+  onWeek: (direction: number) => void; onToday: () => void; onEvent: (event: EventItem) => void;
+}) {
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(week);
+    date.setDate(date.getDate() + index);
+    return date;
+  });
+  const rangeLabel = `${fmtDate(days[0], { month: "short", day: "numeric" })} – ${fmtDate(days[6], { month: "short", day: "numeric", year: "numeric" })}`;
+  const hourStart = 8;
+  const hourCount = 13;
+  const pxPerMinute = 48 / 60;
+
+  const eventBlocksForDay = (date: Date) => {
+    const day = dayKey(date);
+    return events.filter((event) => dayKey(safeDate(event.start), event.timeZone) === day).map((event) => ({
+      kind: "event" as const, key: event.id, start: safeDate(event.start), end: safeDate(event.end), event, zone: event.timeZone,
+      availability: availability[event.id] ?? "unknown",
+    }));
+  };
+  const busyBlocksForDay = (date: Date) => (busyIntervals ?? []).filter((interval) => dayKey(safeDate(interval.start), interval.timeZone) === dayKey(date, interval.timeZone))
+    .map((interval, index) => ({ kind: "busy" as const, key: `busy-${index}-${interval.start}`, start: safeDate(interval.start), end: safeDate(interval.end), interval, zone: interval.timeZone ?? "America/Los_Angeles" }));
+
+  return <div className="calendar-wrap">
+    <div className="calendar-top">
+      <div className="calendar-range"><div className="calendar-nav">
+        <button className="icon-button" aria-label="Previous week" onClick={() => onWeek(-1)}><ChevronLeft size={16} /></button>
+        <button className="icon-button" aria-label="Next week" onClick={() => onWeek(1)}><ChevronRight size={16} /></button>
+      </div><strong>{rangeLabel}</strong><button className="text-button" style={{ fontSize: 10, padding: 6 }} onClick={onToday}>Today</button></div>
+      <div className="calendar-legend">
+        <span className="legend-item"><i className="legend-swatch" />Existing</span>
+        <span className="legend-item"><i className="legend-swatch suggested" />Suggested</span>
+        <span className="legend-item"><i className="legend-swatch conflict" />Conflict</span>
+      </div>
+    </div>
+    <div className="calendar-grid">
+      <div className="calendar-days"><div className="day-cell" aria-hidden="true" />
+        {days.map((date) => <div className={`day-cell ${dayKey(date) === dayKey(new Date()) ? "today" : ""}`} key={date.toISOString()}>{fmtDate(date, { weekday: "short" })}<strong>{fmtDate(date, { day: "numeric" })}</strong></div>)}
+      </div>
+      <div className="time-grid">
+        <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{fmtDate(new Date(2024, 0, 1, hourStart + index), { hour: "numeric" })}</div>)}</div>
+        {days.map((date) => {
+          const blocks = [...eventBlocksForDay(date), ...busyBlocksForDay(date)]
+            .filter((block) => block.end > new Date(date.getTime() + hourStart * 3600000) && block.start < new Date(date.getTime() + (hourStart + hourCount) * 3600000))
+            .sort((a, b) => a.start.getTime() - b.start.getTime());
+          const lanes: number[] = [];
+          const allocated = blocks.map((block) => {
+            const startMinute = minuteInZone(block.start, block.zone);
+            let lane = lanes.findIndex((laneEnd) => laneEnd <= startMinute);
+            if (lane < 0) lane = lanes.length;
+            lanes[lane] = startMinute + (block.end.getTime() - block.start.getTime()) / 60000;
+            return { ...block, lane };
+          });
+          const laneCount = Math.max(1, lanes.length);
+          return <div className="calendar-day-col" key={date.toISOString()}>
+            {allocated.map((block) => {
+              const rawTop = (minuteInZone(block.start, block.zone) - hourStart * 60) * pxPerMinute;
+              const rawHeight = (block.end.getTime() - block.start.getTime()) * pxPerMinute / 60000;
+              const top = Math.max(0, rawTop);
+              const height = Math.max(18, Math.min(hourCount * 48 - top, rawHeight));
+              const busy = block.kind === "busy";
+              return <button key={block.key} type="button" className={`cal-block ${busy ? "busy" : `suggested ${block.availability === "conflict" ? "conflict" : ""}`}`}
+                style={{ top, height, left: `calc(${block.lane} * (100% - 8px) / ${laneCount} + 4px)`, width: `calc((100% - 8px) / ${laneCount} - 3px)` }}
+                onClick={() => { if (block.kind === "event") onEvent(block.event); }} disabled={busy}
+                aria-label={busy ? "Existing calendar commitment" : `${block.event.title}, ${availabilityLabel[block.availability]}`}>
+                <strong>{busy ? "Existing commitment" : block.event.title}</strong>
+                <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" })}{!busy && ` · ${block.event.city}`}</span>
+              </button>;
+            })}
+          </div>;
+        })}
+      </div>
+    </div>
+    <p className="calendar-foot">Calendar blocks are shown at actual times. Select a suggestion to see its details; nothing is added to your calendar.</p>
+  </div>;
+}
+
+function EventModal({ event, availability, saved, onSave, onClose }: {
+  event: EventItem; availability: Availability; saved: boolean; onSave: () => void; onClose: () => void;
+}) {
+  return <div className="modal-backdrop" onMouseDown={(eventClick) => { if (eventClick.target === eventClick.currentTarget) onClose(); }}>
+    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="event-dialog-title">
+      <div className="modal-header"><div><div className="eyebrow">A possibility nearby · Demo</div><h2 id="event-dialog-title">{event.title}</h2></div><button className="modal-close" aria-label="Close details" onClick={onClose}><X size={17} /></button></div>
+      <div className="modal-content">
+        <div className="detail-meta">
+          <div className="meta-block"><small>When</small><strong>{formatLongDate(safeDate(event.start))}<br />{eventClock(event)} – {eventClock(event, true).replace(/ [A-Z]{2,5}$/, "")}</strong></div>
+          <div className="meta-block"><small>Where</small><strong>{event.venue}<br />{event.city}</strong></div>
+          <div className="meta-block"><small>Calendar fit</small><strong className={`availability ${availability}`}>{availabilityLabel[availability]}</strong></div>
+          <div className="meta-block"><small>Source</small><strong>Demo listing</strong></div>
+        </div>
+        <p className="detail-description">{event.description}</p>
+        <div className="detail-tag-list">{event.topics.map((topic) => <span className="mini-tag topic" key={topic}>{topic}</span>)}{event.formats.map((format) => <span className="mini-tag" key={format}>{format}</span>)}</div>
+        <div className="modal-actions">
+          <button className="button primary" onClick={() => downloadIcs(event)}><Download size={14} /> Download .ics</button>
+          <button className="button secondary" onClick={onSave}><Bookmark size={14} fill={saved ? "currentColor" : "none"} /> {saved ? "Saved" : "Save event"}</button>
+          <a className="external-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={13} /></a>
+        </div>
+        <p className="filter-note" style={{ marginTop: 12 }}>Downloading an .ics file does not add anything automatically. Luma live search is disabled; this listing is demo data.</p>
+      </div>
+    </section>
+  </div>;
+}
+
+function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose, onImport, onClearImport }: {
+  preferences: Preferences; syncStatus: { lastSyncedAt: string | null; sourceCount: number; isStale: boolean };
+  busyOrigin: string; onSave: (preferences: Preferences) => void; onClose: () => void;
+  onImport: (file?: File) => Promise<void>; onClearImport: () => void;
+}) {
+  const [keywords, setKeywords] = useState(preferences.keywords.join(", "));
+  const [cities, setCities] = useState(preferences.cities.join(", "));
+  const [horizon, setHorizon] = useState(String(preferences.dateHorizonDays));
+  const [topics, setTopics] = useState<Topic[]>(preferences.topics);
+  const [formats, setFormats] = useState<Format[]>(preferences.formats);
+  const [importMessage, setImportMessage] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  const toggleTopic = (topic: Topic) => setTopics((current) => current.includes(topic) ? current.filter((item) => item !== topic) : [...current, topic]);
+  const toggleFormat = (format: Format) => setFormats((current) => current.includes(format) ? current.filter((item) => item !== format) : [...current, format]);
+  const submitImport = async (file?: File) => {
+    if (!file) return;
+    setImportMessage("");
+    try {
+      await onImport(file);
+      setImportMessage(`${file.name} imported successfully. Times remain local.`);
+    } catch (error) {
+      setImportMessage(error instanceof Error ? error.message : "Could not import this file.");
+    }
+    if (inputRef.current) inputRef.current.value = "";
+  };
+  const syncText = syncStatus.lastSyncedAt
+    ? `Last imported ${new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short" }).format(new Date(syncStatus.lastSyncedAt))}${syncStatus.sourceCount ? ` · ${syncStatus.sourceCount} source${syncStatus.sourceCount === 1 ? "" : "s"}` : ""}`
+    : "No personal calendar file has been imported.";
+
+  return <div className="modal-backdrop" onMouseDown={(eventClick) => { if (eventClick.target === eventClick.currentTarget) onClose(); }}>
+    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="preferences-title">
+      <div className="modal-header"><div><div className="eyebrow">Make it yours</div><h2 id="preferences-title">Your preferences</h2></div><button className="modal-close" aria-label="Close preferences" onClick={onClose}><X size={17} /></button></div>
+      <div className="modal-content">
+        <div className="form-field"><label htmlFor="keywords">Keywords you’re curious about</label><input id="keywords" value={keywords} onChange={(event) => setKeywords(event.target.value)} placeholder="AI agents, climate tech" /><p className="help">Separate ideas with commas. Used as your saved discovery defaults.</p></div>
+        <div className="form-field"><label htmlFor="cities">Cities</label><input id="cities" value={cities} onChange={(event) => setCities(event.target.value)} placeholder="San Francisco, Berkeley" /><p className="help">Leave empty to include every available Bay Area city.</p></div>
+        <div className="form-field"><label htmlFor="horizon">Look ahead</label><select id="horizon" value={horizon} onChange={(event) => setHorizon(event.target.value)}>{Array.from({ length: 30 }, (_, index) => <option value={index + 1} key={index}>{index + 1} days</option>)}</select></div>
+        <h3 className="pref-section-title">Optional topic defaults</h3>
+        <div className="pref-chips">{TOPICS.map((topic) => <button type="button" key={topic} aria-pressed={topics.includes(topic)} className={`chip ${topics.includes(topic) ? "active" : ""}`} onClick={() => toggleTopic(topic)}>{topics.includes(topic) && <Check size={10} style={{ marginRight: 3, verticalAlign: "-1px" }} />}{topic}</button>)}</div>
+        <h3 className="pref-section-title">Optional format defaults</h3>
+        <div className="pref-chips">{FORMATS.map((format) => <button type="button" key={format} aria-pressed={formats.includes(format)} className={`chip ${formats.includes(format) ? "active" : ""}`} onClick={() => toggleFormat(format)}>{formats.includes(format) && <Check size={10} style={{ marginRight: 3, verticalAlign: "-1px" }} />}{format}</button>)}</div>
+
+        <h3 className="pref-section-title">Calendar context</h3>
+        <div className={`status-box ${syncStatus.isStale ? "warning" : ""}`}>
+          <strong>{busyOrigin}</strong><br />{syncText}
+          {syncStatus.isStale && <><br />This calendar file may be out of date. Import a fresh one when you’re ready.</>}
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input ref={inputRef} className="file-input" type="file" accept=".json,application/json" aria-label="Choose local calendar JSON" onChange={(event) => void submitImport(event.target.files?.[0])} />
+          <button type="button" className="button secondary" onClick={() => inputRef.current?.click()}><Upload size={14} /> Import calendar JSON</button>
+          {busyOrigin === "Imported locally" && <button type="button" className="button secondary" onClick={onClearImport}><RotateCcw size={14} /> Restore demo sample</button>}
+        </div>
+        {importMessage && <p className={`import-message ${importMessage.includes("successfully") ? "" : "error"}`} role="status">{importMessage}</p>}
+        <p className="filter-note">Calendar files are read on this device. Imported calendar times remain local and are never uploaded by this workspace.</p>
+        <div className="modal-actions" style={{ marginTop: 19 }}>
+          <button className="button primary" onClick={() => onSave({
+            keywords: keywords.split(",").map((value) => value.trim()).filter(Boolean),
+            cities: cities.split(",").map((value) => value.trim()).filter(Boolean),
+            dateHorizonDays: Math.max(1, Math.min(30, Number(horizon) || 1)),
+            topics, formats,
+          })}>Save preferences</button>
+          <button className="button secondary" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </section>
+  </div>;
+}
+
+export default App;
