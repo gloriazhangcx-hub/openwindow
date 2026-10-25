@@ -115,6 +115,19 @@ function App() {
     return [...groups.entries()];
   }, [filteredEvents]);
 
+  const calendarEvents = useMemo(() => {
+    const weekDays = new Set(
+      Array.from({ length: 7 }, (_, index) => {
+        const date = new Date(week);
+        date.setDate(date.getDate() + index);
+        return dayKey(date);
+      }),
+    );
+    return filteredEvents.filter((event) =>
+      weekDays.has(dayKey(safeDate(event.start), event.timeZone)),
+    );
+  }, [filteredEvents, week]);
+
   const clearFilters = () => {
     setSelectedTopics([]);
     setSelectedFormats([]);
@@ -197,7 +210,11 @@ function App() {
               </div>
               <div className="toolbar-right">
                 <button className={`saved-toggle ${savedOnly ? "active" : ""}`} aria-pressed={savedOnly} onClick={() => setSavedOnly(!savedOnly)}><Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> Saved <span>{model.savedEventIds.length}</span></button>
-                <span className="count-label">{filteredEvents.length} {filteredEvents.length === 1 ? "event" : "events"}</span>
+                <span className="count-label">
+                  {view === "calendar"
+                    ? `${calendarEvents.length} this week · ${filteredEvents.length} total`
+                    : `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"}`}
+                </span>
               </div>
             </div>
             {view === "list" ? (
@@ -211,7 +228,7 @@ function App() {
                 <div className="footer-note"><span>Times shown in each event’s local time zone.</span><span>Every event is a suggestion, never a calendar booking.</span></div>
               </div> : <EmptyState savedOnly={savedOnly} onReset={() => { clearFilters(); }} onPreferences={() => setPreferencesOpen(true)} /> 
             ) : (
-              <CalendarView week={week} events={filteredEvents} busyIntervals={model.busyIntervals} availability={model.availabilityByEvent} onWeek={(amount) => { const next = new Date(week); next.setDate(next.getDate() + amount * 7); setWeek(next); }} onToday={() => setWeek(weekStart(new Date()))} onEvent={setActiveEvent} />
+              <CalendarView week={week} events={calendarEvents} busyIntervals={model.busyIntervals} availability={model.availabilityByEvent} onWeek={(amount) => { const next = new Date(week); next.setDate(next.getDate() + amount * 7); setWeek(next); }} onToday={() => setWeek(weekStart(new Date()))} onEvent={setActiveEvent} />
             )}
           </section>
         </div>
@@ -334,7 +351,7 @@ function CalendarView({ week, events, busyIntervals, availability, onWeek, onTod
         })}
       </div>
     </div>
-    <p className="calendar-foot">Calendar blocks are shown at actual times. Select a suggestion to see its details; nothing is added to your calendar.</p>
+    <p className="calendar-foot">Showing this week only; the List includes the full search horizon. Use the arrows to move between weeks. Calendar blocks use actual event times. Select a suggestion for details; nothing is added automatically.</p>
   </div>;
 }
 
