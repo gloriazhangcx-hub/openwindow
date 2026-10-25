@@ -6,6 +6,12 @@ import {
 } from "lucide-react";
 import { useOpenWindow } from "./lib/useOpenWindow";
 import { getVisibleMinuteRange } from "./lib/calendar-grid";
+import {
+  atCalendarNoon,
+  getCalendarViewDays,
+  navigateCalendarDate,
+  type CalendarMode,
+} from "./lib/calendar-views";
 import type { Availability, BusyInterval, EventItem, Format, Preferences, Topic } from "./types";
 import { FORMATS, TOPICS } from "./types";
 
@@ -17,7 +23,6 @@ const fmtDate = (date: Date, options: Intl.DateTimeFormatOptions, zone = "Americ
   new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone }).format(date);
 const dayKey = (date: Date, zone = "America/Los_Angeles") =>
   new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
-const startOfDay = (date: Date) => new Date(date.getFullYear(), date.getMonth(), date.getDate());
 const availabilityLabel: Record<Availability, string> = {
   available: "Available", conflict: "Conflict", unknown: "Unknown",
 };
@@ -54,22 +59,20 @@ function downloadIcs(event: EventItem) {
   URL.revokeObjectURL(url);
 }
 
-function weekStart(date: Date) {
-  const result = startOfDay(date);
-  result.setDate(result.getDate() - ((result.getDay() + 6) % 7));
-  result.setHours(12, 0, 0, 0);
-  return result;
-}
-
-function initialWeek() {
+function initialCalendarDate() {
   const value = new URLSearchParams(window.location.search).get("week");
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return weekStart(new Date());
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return atCalendarNoon(new Date());
   const [year, month, day] = value.split("-").map(Number);
   const date = new Date(year, month - 1, day, 12);
   if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-    return weekStart(new Date());
+    return atCalendarNoon(new Date());
   }
-  return weekStart(date);
+  return date;
+}
+
+function initialCalendarMode(): CalendarMode {
+  const value = new URLSearchParams(window.location.search).get("mode");
+  return value === "day" || value === "month" ? value : "week";
 }
 
 function App() {
@@ -77,13 +80,14 @@ function App() {
   const [view, setView] = useState<View>(() =>
     new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "list",
   );
+  const [calendarMode, setCalendarMode] = useState<CalendarMode>(initialCalendarMode);
+  const [calendarDate, setCalendarDate] = useState(initialCalendarDate);
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
   const [selectedFormats, setSelectedFormats] = useState<Format[]>(model.preferences.formats);
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
   const [savedOnly, setSavedOnly] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [week, setWeek] = useState(initialWeek);
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -120,24 +124,29 @@ function App() {
     return [...groups.entries()];
   }, [filteredEvents]);
 
+  const calendarDays = useMemo(
+    () => getCalendarViewDays(calendarDate, calendarMode),
+    [calendarDate, calendarMode],
+  );
+
   const calendarEvents = useMemo(() => {
-    const weekDays = new Set(
-      Array.from({ length: 7 }, (_, index) => {
-        const date = new Date(week);
-        date.setDate(date.getDate() + index);
-        return dayKey(date);
-      }),
-    );
+    const visibleDays = new Set(calendarDays.map((date) => dayKey(date)));
     return filteredEvents.filter((event) =>
-      weekDays.has(dayKey(safeDate(event.start), event.timeZone)),
+      visibleDays.has(dayKey(safeDate(event.start), event.timeZone)),
     );
-  }, [filteredEvents, week]);
+  }, [filteredEvents, calendarDays]);
 
   const clearFilters = () => {
     setSelectedTopics([]);
     setSelectedFormats([]);
     setAvailabilityFilter("all");
     setSavedOnly(false);
+  };
+
+  const openCalendar = () => {
+    setCalendarDate(atCalendarNoon(new Date()));
+    setCalendarMode("week");
+    setView("calendar");
   };
 
   const onImport = async (file?: File) => {
@@ -211,13 +220,13 @@ function App() {
             <div className="panel-toolbar">
               <div className="view-switch" role="tablist" aria-label="Event view">
                 <button role="tab" aria-selected={view === "list"} className={view === "list" ? "selected" : ""} onClick={() => setView("list")}><LayoutList size={15} /> List</button>
-                <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "selected" : ""} onClick={() => setView("calendar")}><CalendarDays size={15} /> Calendar</button>
+                <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "selected" : ""} onClick={openCalendar}><CalendarDays size={15} /> Calendar</button>
               </div>
               <div className="toolbar-right">
                 <button className={`saved-toggle ${savedOnly ? "active" : ""}`} aria-pressed={savedOnly} onClick={() => setSavedOnly(!savedOnly)}><Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> Saved <span>{model.savedEventIds.length}</span></button>
                 <span className="count-label">
                   {view === "calendar"
-                    ? `${calendarEvents.length} this week · ${filteredEvents.length} total`
+                    ? `${calendarEvents.length} ${calendarMode === "week" ? "this week" : calendarMode === "day" ? "in day" : "in month view"} · ${filteredEvents.length} total`
                     : `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"}`}
                 </span>
               </div>
@@ -233,7 +242,19 @@ function App() {
                 <div className="footer-note"><span>Times shown in each event’s local time zone.</span><span>Every event is a suggestion, never a calendar booking.</span></div>
               </div> : <EmptyState savedOnly={savedOnly} onReset={() => { clearFilters(); }} onPreferences={() => setPreferencesOpen(true)} /> 
             ) : (
-              <CalendarView week={week} events={calendarEvents} busyIntervals={model.busyIntervals} availability={model.availabilityByEvent} onWeek={(amount) => { const next = new Date(week); next.setDate(next.getDate() + amount * 7); setWeek(next); }} onToday={() => setWeek(weekStart(new Date()))} onEvent={setActiveEvent} />
+              <CalendarView
+                date={calendarDate}
+                mode={calendarMode}
+                days={calendarDays}
+                events={calendarEvents}
+                busyIntervals={model.busyIntervals}
+                availability={model.availabilityByEvent}
+                onModeChange={setCalendarMode}
+                onNavigate={(amount) => setCalendarDate((date) => navigateCalendarDate(date, calendarMode, amount))}
+                onToday={() => setCalendarDate(atCalendarNoon(new Date()))}
+                onSelectDate={(date) => { setCalendarDate(atCalendarNoon(date)); setCalendarMode("day"); }}
+                onEvent={setActiveEvent}
+              />
             )}
           </section>
         </div>
@@ -282,19 +303,24 @@ function EmptyState({ savedOnly, onReset, onPreferences }: { savedOnly: boolean;
   </div>;
 }
 
-function CalendarView({ week, events, busyIntervals, availability, onWeek, onToday, onEvent }: {
-  week: Date; events: EventItem[]; busyIntervals: BusyInterval[] | null; availability: Record<string, Availability>;
-  onWeek: (direction: number) => void; onToday: () => void; onEvent: (event: EventItem) => void;
+function CalendarView({ date, mode, days, events, busyIntervals, availability, onModeChange, onNavigate, onToday, onSelectDate, onEvent }: {
+  date: Date; mode: CalendarMode; days: Date[]; events: EventItem[]; busyIntervals: BusyInterval[] | null;
+  availability: Record<string, Availability>; onModeChange: (mode: CalendarMode) => void;
+  onNavigate: (direction: number) => void; onToday: () => void; onSelectDate: (date: Date) => void;
+  onEvent: (event: EventItem) => void;
 }) {
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(week);
-    date.setDate(date.getDate() + index);
-    return date;
-  });
-  const rangeLabel = `${fmtDate(days[0], { month: "short", day: "numeric" })} – ${fmtDate(days[6], { month: "short", day: "numeric", year: "numeric" })}`;
+  const rangeLabel = mode === "day"
+    ? fmtDate(date, { weekday: "long", month: "short", day: "numeric", year: "numeric" })
+    : mode === "week"
+      ? `${fmtDate(days[0], { month: "short", day: "numeric" })} – ${fmtDate(days[6], { month: "short", day: "numeric", year: "numeric" })}`
+      : fmtDate(date, { month: "long", year: "numeric" });
   const hourStart = 8;
   const hourCount = 13;
   const pxPerMinute = 48 / 60;
+  const columns = mode === "day"
+    ? "48px minmax(240px, 1fr)"
+    : "48px repeat(7, minmax(80px, 1fr))";
+  const monthWeekdays = days.slice(0, 7);
 
   const eventBlocksForDay = (date: Date) => {
     const day = dayKey(date);
@@ -308,55 +334,115 @@ function CalendarView({ week, events, busyIntervals, availability, onWeek, onTod
 
   return <div className="calendar-wrap">
     <div className="calendar-top">
-      <div className="calendar-range"><div className="calendar-nav">
-        <button className="icon-button" aria-label="Previous week" onClick={() => onWeek(-1)}><ChevronLeft size={16} /></button>
-        <button className="icon-button" aria-label="Next week" onClick={() => onWeek(1)}><ChevronRight size={16} /></button>
-      </div><strong>{rangeLabel}</strong><button className="text-button" style={{ fontSize: 10, padding: 6 }} onClick={onToday}>Today</button></div>
+      <div className="calendar-controls">
+        <div className="calendar-mode-switch" role="tablist" aria-label="Calendar mode">
+          {(["day", "week", "month"] as const).map((calendarMode) => (
+            <button key={calendarMode} type="button" role="tab" aria-selected={mode === calendarMode}
+              className={mode === calendarMode ? "selected" : ""}
+              onClick={() => onModeChange(calendarMode)}>
+              {calendarMode[0].toUpperCase() + calendarMode.slice(1)}
+            </button>
+          ))}
+        </div>
+        <div className="calendar-range">
+          <div className="calendar-nav">
+            <button className="icon-button" aria-label={`Previous ${mode}`} onClick={() => onNavigate(-1)}><ChevronLeft size={16} /></button>
+            <button className="icon-button" aria-label={`Next ${mode}`} onClick={() => onNavigate(1)}><ChevronRight size={16} /></button>
+          </div>
+          <strong>{rangeLabel}</strong>
+          <button className="text-button" style={{ fontSize: 10, padding: 6 }} onClick={onToday}>Today</button>
+        </div>
+      </div>
       <div className="calendar-legend">
         <span className="legend-item"><i className="legend-swatch" />Existing</span>
         <span className="legend-item"><i className="legend-swatch suggested" />Suggested</span>
         <span className="legend-item"><i className="legend-swatch conflict" />Conflict</span>
       </div>
     </div>
-    <div className="calendar-grid">
-      <div className="calendar-days"><div className="day-cell" aria-hidden="true" />
-        {days.map((date) => <div className={`day-cell ${dayKey(date) === dayKey(new Date()) ? "today" : ""}`} key={date.toISOString()}>{fmtDate(date, { weekday: "short" })}<strong>{fmtDate(date, { day: "numeric" })}</strong></div>)}
+    {mode === "month" ? (
+      <div className="calendar-grid month-view">
+        <div className="calendar-month-weekdays">
+          {monthWeekdays.map((day) => <div key={day.toISOString()}>{fmtDate(day, { weekday: "short" })}</div>)}
+        </div>
+        <div className="calendar-month-grid">
+          {days.map((day) => {
+            const dayEvents = events.filter((event) => dayKey(safeDate(event.start), event.timeZone) === dayKey(day));
+            const dayBusyCount = (busyIntervals ?? []).filter((interval) =>
+              dayKey(safeDate(interval.start), interval.timeZone) === dayKey(day, interval.timeZone),
+            ).length;
+            const currentMonth = day.getMonth() === date.getMonth() && day.getFullYear() === date.getFullYear();
+            const today = dayKey(day) === dayKey(new Date());
+            return <section className={`month-cell ${currentMonth ? "" : "outside-month"}`} key={day.toISOString()}>
+              <button type="button" className={`month-date ${today ? "today" : ""}`}
+                aria-label={`Open ${fmtDate(day, { weekday: "long", month: "long", day: "numeric" })} in day view`}
+                onClick={() => onSelectDate(day)}>
+                {fmtDate(day, { day: "numeric" })}
+              </button>
+              <div className="month-day-events">
+                {dayEvents.slice(0, 3).map((event) => (
+                  <button type="button" key={event.id}
+                    className={`month-event ${availability[event.id] === "conflict" ? "conflict" : ""}`}
+                    onClick={() => onEvent(event)}>
+                    <span>{fmtDate(safeDate(event.start), { hour: "numeric", minute: "2-digit" }, event.timeZone)}</span>
+                    <strong>{event.title}</strong>
+                  </button>
+                ))}
+                {dayEvents.length > 3 && <span className="month-more">+{dayEvents.length - 3} more</span>}
+                {dayBusyCount > 0 && <span className="month-busy">{dayBusyCount} existing</span>}
+              </div>
+            </section>;
+          })}
+        </div>
       </div>
-      <div className="time-grid">
-        <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1, hourStart + index)))}</div>)}</div>
-        {days.map((date) => {
-          const blocks = [...eventBlocksForDay(date), ...busyBlocksForDay(date)]
-            .flatMap((block) => {
-              const timeRange = getVisibleMinuteRange(block.start, block.end, block.zone, hourStart, hourStart + hourCount);
-              return timeRange ? [{ ...block, timeRange }] : [];
-            })
-            .sort((a, b) => a.start.getTime() - b.start.getTime());
-          const lanes: number[] = [];
-          const allocated = blocks.map((block) => {
-            let lane = lanes.findIndex((laneEnd) => laneEnd <= block.timeRange.visibleStartMinute);
-            if (lane < 0) lane = lanes.length;
-            lanes[lane] = block.timeRange.visibleEndMinute;
-            return { ...block, lane };
-          });
-          const laneCount = Math.max(1, lanes.length);
-          return <div className="calendar-day-col" key={date.toISOString()}>
-            {allocated.map((block) => {
-              const top = (block.timeRange.visibleStartMinute - hourStart * 60) * pxPerMinute;
-              const height = Math.max(18, (block.timeRange.visibleEndMinute - block.timeRange.visibleStartMinute) * pxPerMinute);
-              const busy = block.kind === "busy";
-              return <button key={block.key} type="button" className={`cal-block ${busy ? "busy" : `suggested ${block.availability === "conflict" ? "conflict" : ""}`}`}
-                style={{ top, height, left: `calc(${block.lane} * (100% - 8px) / ${laneCount} + 4px)`, width: `calc((100% - 8px) / ${laneCount} - 3px)` }}
-                onClick={() => { if (block.kind === "event") onEvent(block.event); }} disabled={busy}
-                aria-label={busy ? "Existing calendar commitment" : `${block.event.title}, ${availabilityLabel[block.availability]}`}>
-                <strong>{busy ? "Existing commitment" : block.event.title}</strong>
-                <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" })}{!busy && ` · ${block.event.city}`}</span>
-              </button>;
-            })}
-          </div>;
-        })}
+    ) : (
+      <div className={`calendar-grid ${mode}-view`}>
+        <div className="calendar-days" style={{ gridTemplateColumns: columns }}>
+          <div className="day-cell" aria-hidden="true" />
+          {days.map((day) => <div className={`day-cell ${dayKey(day) === dayKey(new Date()) ? "today" : ""}`} key={day.toISOString()}>
+            {mode === "week" && fmtDate(day, { weekday: "short" })}
+            <strong>{fmtDate(day, { day: "numeric" })}</strong>
+          </div>)}
+        </div>
+        <div className="time-grid" style={{ gridTemplateColumns: columns }}>
+          <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1, hourStart + index)))}</div>)}</div>
+          {days.map((day) => {
+            const blocks = [...eventBlocksForDay(day), ...busyBlocksForDay(day)]
+              .flatMap((block) => {
+                const timeRange = getVisibleMinuteRange(block.start, block.end, block.zone, hourStart, hourStart + hourCount);
+                return timeRange ? [{ ...block, timeRange }] : [];
+              })
+              .sort((a, b) => a.start.getTime() - b.start.getTime());
+            const lanes: number[] = [];
+            const allocated = blocks.map((block) => {
+              let lane = lanes.findIndex((laneEnd) => laneEnd <= block.timeRange.visibleStartMinute);
+              if (lane < 0) lane = lanes.length;
+              lanes[lane] = block.timeRange.visibleEndMinute;
+              return { ...block, lane };
+            });
+            const laneCount = Math.max(1, lanes.length);
+            return <div className="calendar-day-col" key={day.toISOString()}>
+              {allocated.map((block) => {
+                const top = (block.timeRange.visibleStartMinute - hourStart * 60) * pxPerMinute;
+                const height = Math.max(18, (block.timeRange.visibleEndMinute - block.timeRange.visibleStartMinute) * pxPerMinute);
+                const busy = block.kind === "busy";
+                return <button key={block.key} type="button" className={`cal-block ${busy ? "busy" : `suggested ${block.availability === "conflict" ? "conflict" : ""}`}`}
+                  style={{ top, height, left: `calc(${block.lane} * (100% - 8px) / ${laneCount} + 4px)`, width: `calc((100% - 8px) / ${laneCount} - 3px)` }}
+                  onClick={() => { if (block.kind === "event") onEvent(block.event); }} disabled={busy}
+                  aria-label={busy ? "Existing calendar commitment" : `${block.event.title}, ${availabilityLabel[block.availability]}`}>
+                  <strong>{busy ? "Existing commitment" : block.event.title}</strong>
+                  <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" }, block.zone)}{!busy && ` · ${block.event.city}`}</span>
+                </button>;
+              })}
+            </div>;
+          })}
+        </div>
       </div>
-    </div>
-    <p className="calendar-foot">Showing this week only; the List includes the full search horizon. Use the arrows to move between weeks. Calendar blocks use actual event times. Select a suggestion for details; nothing is added automatically.</p>
+    )}
+    <p className="calendar-foot">
+      {mode === "month"
+        ? "Select a date to open day view, or select an event for details. Existing calendar commitments are marked without showing private event details."
+        : `Showing ${mode === "week" ? "this week" : "this day"} only. Use the arrows to navigate; Today returns to the current ${mode}. Select a suggestion for details. Nothing is added automatically.`}
+    </p>
   </div>;
 }
 

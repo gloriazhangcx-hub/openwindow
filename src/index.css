@@ -111,7 +111,11 @@ h1 { margin:9px 0 8px;font:500 clamp(34px,4.4vw,54px)/1.06 "Newsreader",serif;le
 .button.danger { background:#fbefec;border:1px solid #efd4cd;color:#b35e50; }
 .footer-note { display:flex;justify-content:space-between;gap:16px;margin-top:17px;color:#929c93;font-size:10px; }
 .calendar-wrap { padding:18px;overflow-x:auto; }
-.calendar-top { display:flex;align-items:center;justify-content:space-between;margin-bottom:15px; }
+.calendar-top { display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:15px; }
+.calendar-controls { display:flex;align-items:center;gap:12px;flex-wrap:wrap; }
+.calendar-mode-switch { display:inline-flex;padding:3px;background:#eff1eb;border-radius:9px;gap:2px; }
+.calendar-mode-switch button { border:0;background:transparent;border-radius:7px;padding:7px 10px;color:#748078;font-size:11px;font-weight:600;cursor:pointer; }
+.calendar-mode-switch button.selected { background:#fbfcf7;color:#315f54;box-shadow:0 1px 4px #263e3417; }
 .calendar-range { display:flex;align-items:center;gap:10px; }
 .calendar-range strong { font:700 13px "Manrope",sans-serif;color:#42594d; }
 .calendar-nav { display:flex;gap:5px; }
@@ -121,10 +125,27 @@ h1 { margin:9px 0 8px;font:500 clamp(34px,4.4vw,54px)/1.06 "Newsreader",serif;le
 .legend-swatch.suggested {background:#e4eee5;border:1px dashed #62816d;}
 .legend-swatch.conflict {background:#f6e7df;border:1px dashed #c77b68;}
 .calendar-grid { min-width:700px;border:1px solid #e5eae2;border-radius:10px;overflow:hidden; }
+.calendar-grid.day-view { min-width:480px; }
+.calendar-grid.month-view { min-width:700px; }
 .calendar-days { display:grid;grid-template-columns:48px repeat(7,minmax(80px,1fr));background:#f5f7f1;border-bottom:1px solid #e5eae2; }
 .day-cell { padding:9px 4px;text-align:center;border-left:1px solid #e8ece5;color:#77857c;font-size:9px; }
 .day-cell strong { display:block;color:#435b4e;font-size:12px;margin-top:3px; }
 .day-cell.today strong { display:inline-grid;place-items:center;width:21px;height:21px;border-radius:50%;background:#315f54;color:white; }
+.calendar-month-weekdays,.calendar-month-grid { display:grid;grid-template-columns:repeat(7,minmax(80px,1fr)); }
+.calendar-month-weekdays { background:#f5f7f1;border-bottom:1px solid #e5eae2; }
+.calendar-month-weekdays > div { padding:9px 4px;text-align:center;color:#77857c;font-size:9px; }
+.month-cell { min-width:0;min-height:112px;padding:6px;border-right:1px solid #e8ece5;border-bottom:1px solid #e8ece5;background:#fbfcf7; }
+.month-cell.outside-month { background:#f6f7f2; }
+.month-date { width:23px;height:23px;padding:0;border:0;border-radius:50%;background:transparent;color:#64756b;font-size:10px;cursor:pointer; }
+.month-date:hover { background:#e8efe8; }
+.month-date.today { background:#315f54;color:white;font-weight:700; }
+.month-day-events { display:grid;gap:4px;margin-top:4px; }
+.month-event { display:flex;align-items:flex-start;gap:4px;width:100%;min-width:0;padding:4px;border:1px solid #d5e2d6;border-radius:5px;background:#eaf1e9;color:#3e604c;text-align:left;cursor:pointer; }
+.month-event:hover { border-color:#82a18a;background:#e1ece2; }
+.month-event.conflict { border-color:#cf8b78;background:#f7e9e2;color:#9c5144; }
+.month-event span { flex:none;font-size:8px;line-height:1.25; }
+.month-event strong { min-width:0;overflow:hidden;font-size:8px;line-height:1.25;text-overflow:ellipsis; }
+.month-more,.month-busy { display:block;overflow:hidden;color:#839087;font-size:8px;text-overflow:ellipsis;white-space:nowrap; }
 .time-grid { display:grid;grid-template-columns:48px repeat(7,minmax(80px,1fr));position:relative; }
 .hours-col { position:relative; }
 .hour-label { height:48px;position:relative;top:-7px;text-align:center;font-size:9px;color:#9aa39b; }
@@ -209,7 +230,9 @@ h1 { margin:9px 0 8px;font:500 clamp(34px,4.4vw,54px)/1.06 "Newsreader",serif;le
  .save-btn {width:28px;height:28px}
  .footer-note {flex-direction:column}
  .calendar-wrap {padding:12px}
- .calendar-top {align-items:flex-start;gap:12px;flex-direction:column}
+  .calendar-top {align-items:flex-start;gap:12px;flex-direction:column}
+  .calendar-controls {align-items:flex-start;flex-direction:column;gap:9px}
+  .calendar-mode-switch button {padding:7px 11px}
  .calendar-legend {gap:9px}
  .modal-backdrop {padding:10px}
  .modal {border-radius:14px}
