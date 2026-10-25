@@ -5,6 +5,7 @@ import {
   RotateCcw, SlidersHorizontal,
 } from "lucide-react";
 import { useOpenWindow } from "./lib/useOpenWindow";
+import { getVisibleMinuteRange } from "./lib/calendar-grid";
 import type { Availability, BusyInterval, EventItem, Format, Preferences, Topic } from "./types";
 import { FORMATS, TOPICS } from "./types";
 
@@ -60,25 +61,29 @@ function weekStart(date: Date) {
   return result;
 }
 
-function minuteInZone(date: Date, zone: string) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23",
-  }).formatToParts(date);
-  const hour = Number(parts.find((part) => part.type === "hour")?.value ?? 0);
-  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? 0);
-  return hour * 60 + minute;
+function initialWeek() {
+  const value = new URLSearchParams(window.location.search).get("week");
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return weekStart(new Date());
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(year, month - 1, day, 12);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return weekStart(new Date());
+  }
+  return weekStart(date);
 }
 
 function App() {
   const model = useOpenWindow();
-  const [view, setView] = useState<View>("list");
+  const [view, setView] = useState<View>(() =>
+    new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "list",
+  );
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
   const [selectedFormats, setSelectedFormats] = useState<Format[]>(model.preferences.formats);
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
   const [savedOnly, setSavedOnly] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
-  const [week, setWeek] = useState(() => weekStart(new Date()));
+  const [week, setWeek] = useState(initialWeek);
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -318,26 +323,26 @@ function CalendarView({ week, events, busyIntervals, availability, onWeek, onTod
         {days.map((date) => <div className={`day-cell ${dayKey(date) === dayKey(new Date()) ? "today" : ""}`} key={date.toISOString()}>{fmtDate(date, { weekday: "short" })}<strong>{fmtDate(date, { day: "numeric" })}</strong></div>)}
       </div>
       <div className="time-grid">
-        <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{fmtDate(new Date(2024, 0, 1, hourStart + index), { hour: "numeric" })}</div>)}</div>
+        <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1, hourStart + index)))}</div>)}</div>
         {days.map((date) => {
           const blocks = [...eventBlocksForDay(date), ...busyBlocksForDay(date)]
-            .filter((block) => block.end > new Date(date.getTime() + hourStart * 3600000) && block.start < new Date(date.getTime() + (hourStart + hourCount) * 3600000))
+            .flatMap((block) => {
+              const timeRange = getVisibleMinuteRange(block.start, block.end, block.zone, hourStart, hourStart + hourCount);
+              return timeRange ? [{ ...block, timeRange }] : [];
+            })
             .sort((a, b) => a.start.getTime() - b.start.getTime());
           const lanes: number[] = [];
           const allocated = blocks.map((block) => {
-            const startMinute = minuteInZone(block.start, block.zone);
-            let lane = lanes.findIndex((laneEnd) => laneEnd <= startMinute);
+            let lane = lanes.findIndex((laneEnd) => laneEnd <= block.timeRange.visibleStartMinute);
             if (lane < 0) lane = lanes.length;
-            lanes[lane] = startMinute + (block.end.getTime() - block.start.getTime()) / 60000;
+            lanes[lane] = block.timeRange.visibleEndMinute;
             return { ...block, lane };
           });
           const laneCount = Math.max(1, lanes.length);
           return <div className="calendar-day-col" key={date.toISOString()}>
             {allocated.map((block) => {
-              const rawTop = (minuteInZone(block.start, block.zone) - hourStart * 60) * pxPerMinute;
-              const rawHeight = (block.end.getTime() - block.start.getTime()) * pxPerMinute / 60000;
-              const top = Math.max(0, rawTop);
-              const height = Math.max(18, Math.min(hourCount * 48 - top, rawHeight));
+              const top = (block.timeRange.visibleStartMinute - hourStart * 60) * pxPerMinute;
+              const height = Math.max(18, (block.timeRange.visibleEndMinute - block.timeRange.visibleStartMinute) * pxPerMinute);
               const busy = block.kind === "busy";
               return <button key={block.key} type="button" className={`cal-block ${busy ? "busy" : `suggested ${block.availability === "conflict" ? "conflict" : ""}`}`}
                 style={{ top, height, left: `calc(${block.lane} * (100% - 8px) / ${laneCount} + 4px)`, width: `calc((100% - 8px) / ${laneCount} - 3px)` }}
