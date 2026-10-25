@@ -23,7 +23,7 @@
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, input, select, textarea { font: inherit; }
 button { color: inherit; }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 3px solid var(--forest); outline-offset: 2px; }
 ::selection { background: #f5e8af; color: #40316f; }
 
 .app-shell { min-height: 100vh; background: var(--paper); }
