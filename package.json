@@ -7,7 +7,7 @@
     "dev": "tsx server/index.ts",
     "build": "vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
-    "test": "tsx --test src/lib/*.test.ts src/data/*.test.ts"
+    "test": "tsx --test src/lib/*.test.ts src/data/*.test.ts server/*.test.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^6.1.2",
