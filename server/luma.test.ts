@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 import {
+  createAuthorizationServerMetadataUrl,
   createLumaClientMetadata,
+  makeLumaAuthorizationUrl,
   createPkcePair,
   findPublicEventSearchTools,
   isValidLumaAuthorization,
+  parseResourceMetadataUrl,
   parseMcpResponseBody,
   readLumaSessionCookie,
   signLumaSessionCookie,
   summarizePublicEventSearchTools,
+  validateLumaOAuthDiscovery,
 } from "./luma";
 
 test("Luma client metadata uses the app origin and a public callback", () => {
@@ -19,6 +23,79 @@ test("Luma client metadata uses the app origin and a public callback", () => {
   assert.deepEqual(metadata.redirect_uris, ["https://openwindow.example/api/luma/callback"]);
   assert.equal(metadata.token_endpoint_auth_method, "none");
   assert.equal(metadata.grant_types.includes("authorization_code"), true);
+});
+
+test("OAuth discovery parses the MCP resource challenge and authorization-server URL", () => {
+  assert.equal(
+    parseResourceMetadataUrl(
+      'Bearer realm="Luma", resource_metadata="https://mcp.luma.com/.well-known/oauth-protected-resource"',
+    ),
+    "https://mcp.luma.com/.well-known/oauth-protected-resource",
+  );
+  assert.equal(parseResourceMetadataUrl("Bearer realm=\"Luma\""), null);
+  assert.equal(
+    createAuthorizationServerMetadataUrl("https://api.luma.com"),
+    "https://api.luma.com/.well-known/oauth-authorization-server",
+  );
+  assert.throws(() => createAuthorizationServerMetadataUrl("https://untrusted.example"));
+});
+
+test("OAuth discovery validates Luma's resource, public-client support, and endpoints", () => {
+  const config = validateLumaOAuthDiscovery(
+    {
+      resource: "https://mcp.luma.com",
+      authorization_servers: ["https://api.luma.com"],
+    },
+    {
+      issuer: "https://api.luma.com",
+      authorization_endpoint: "https://luma.com/oauth/consent?credential_type=personal",
+      token_endpoint: "https://api.luma.com/oauth/token",
+      response_types_supported: ["code"],
+      token_endpoint_auth_methods_supported: ["client_secret_basic", "none"],
+      code_challenge_methods_supported: ["S256"],
+      client_id_metadata_document_supported: true,
+    },
+  );
+  assert.deepEqual(config, {
+    resource: "https://mcp.luma.com",
+    authorizationEndpoint: "https://luma.com/oauth/consent?credential_type=personal",
+    tokenEndpoint: "https://api.luma.com/oauth/token",
+  });
+  assert.throws(() => validateLumaOAuthDiscovery(
+    { resource: "https://mcp.luma.com", authorization_servers: ["https://api.luma.com"] },
+    {
+      issuer: "https://api.luma.com",
+      authorization_endpoint: "https://untrusted.example/oauth/consent",
+      token_endpoint: "https://api.luma.com/oauth/token",
+      client_id_metadata_document_supported: true,
+    },
+  ));
+  assert.throws(() => validateLumaOAuthDiscovery(
+    { resource: "https://mcp.luma.com", authorization_servers: ["https://api.luma.com"] },
+    {
+      issuer: "https://api.luma.com",
+      authorization_endpoint: "https://luma.com/oauth/consent",
+      token_endpoint: "https://api.luma.com/oauth/token",
+      client_id_metadata_document_supported: false,
+    },
+  ));
+});
+
+test("OAuth authorization request preserves Luma's endpoint query and includes resource", () => {
+  const { authorizationUrl } = makeLumaAuthorizationUrl(
+    "https://openwindow.example",
+    "csrf-state",
+    "pkce-challenge",
+    {
+      resource: "https://mcp.luma.com",
+      authorizationEndpoint: "https://luma.com/oauth/consent?credential_type=personal",
+      tokenEndpoint: "https://api.luma.com/oauth/token",
+    },
+  );
+  assert.equal(authorizationUrl.searchParams.get("credential_type"), "personal");
+  assert.equal(authorizationUrl.searchParams.get("resource"), "https://mcp.luma.com");
+  assert.equal(authorizationUrl.searchParams.get("code_challenge_method"), "S256");
+  assert.equal(authorizationUrl.searchParams.get("client_id"), "https://openwindow.example/oauth/luma/client-metadata.json");
 });
 
 test("PKCE creates a verifier and S256 challenge", () => {
