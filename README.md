@@ -29,7 +29,7 @@ npm start
 - Event details include a direct `.ics` download; downloading is an explicit user action.
 - The mock source remains active while the app-side Luma OAuth flow and read-only MCP tool discovery are being validated.
 
-The demo listings are fictional sample data. Their “Open on Luma” links go to the Luma homepage, not a real event registration page. The app now serves a Luma OAuth Client ID Metadata Document and authorization-code/PKCE callback, and can inspect read-only MCP tool definitions after sign-in. Public event search and result mapping are not enabled until the actual Luma tool schema and response have been verified. OAuth tokens stay in server memory and are cleared when the server restarts. No live search or registration data is claimed.
+The demo listings are fictional sample data. Their “Open on Luma” links go to the Luma homepage, not a real event registration page. The app discovers the OAuth endpoints from Luma's MCP challenge and published metadata, then uses a Client ID Metadata Document, authorization-code/PKCE, and the MCP resource parameter. After sign-in it can inspect read-only MCP tool definitions. Public event search and result mapping are not enabled until the actual Luma tool schema and response have been verified. OAuth tokens stay in server memory and are cleared when the server restarts. No live search or registration data is claimed.
 
 Luma sign-in requires `SESSION_SECRET` and a public HTTPS app origin. Development uses `REPLIT_DEV_DOMAIN`; production must set `OPENWINDOW_PUBLIC_URL` to the app's canonical origin.
 
