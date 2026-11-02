@@ -7,8 +7,9 @@ import {
 import type { Express, Request, Response } from "express";
 
 const LUMA_MCP_URL = "https://mcp.luma.com";
-const LUMA_AUTHORIZATION_URL = "https://luma.com/oauth/consent?credential_type=personal";
-const LUMA_TOKEN_URL = "https://api.luma.com/oauth/token";
+const LUMA_MCP_ORIGIN = new URL(LUMA_MCP_URL).origin;
+const LUMA_AUTHORIZATION_ORIGIN = "https://luma.com";
+const LUMA_AUTHORIZATION_SERVER = "https://api.luma.com";
 const CLIENT_METADATA_PATH = "/oauth/luma/client-metadata.json";
 const CALLBACK_PATH = "/api/luma/callback";
 const SESSION_COOKIE = "__Host-openwindow_luma";
@@ -20,6 +21,9 @@ type TokenSet = {
   accessToken: string;
   refreshToken?: string;
   expiresAt?: number;
+  clientId?: string;
+  tokenEndpoint?: string;
+  resource?: string;
 };
 
 type PendingAuthorization = {
@@ -27,7 +31,15 @@ type PendingAuthorization = {
   verifier: string;
   clientId: string;
   redirectUri: string;
+  tokenEndpoint: string;
+  resource: string;
   expiresAt: number;
+};
+
+export type LumaOAuthDiscovery = {
+  resource: string;
+  authorizationEndpoint: string;
+  tokenEndpoint: string;
 };
 
 type JsonRpcMessage = {
@@ -72,6 +84,161 @@ export function createLumaClientMetadata(origin: string) {
     token_endpoint_auth_method: "none",
     application_type: "web",
   };
+}
+
+export function parseResourceMetadataUrl(wwwAuthenticate: string | null): string | null {
+  if (!wwwAuthenticate) return null;
+  const match = wwwAuthenticate.match(/(?:^|[,\s])resource_metadata\s*=\s*(?:"([^"]+)"|([^,\s]+))/i);
+  return match?.[1] ?? match?.[2] ?? null;
+}
+
+export function createAuthorizationServerMetadataUrl(issuer: string): string {
+  const url = new URL(issuer);
+  if (
+    url.protocol !== "https:" ||
+    url.origin !== LUMA_AUTHORIZATION_SERVER ||
+    url.pathname !== "/" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  ) {
+    throw new Error("Luma advertised an unsupported authorization server.");
+  }
+  const issuerPath = url.pathname.replace(/\/+$/, "");
+  return `${url.origin}/.well-known/oauth-authorization-server${issuerPath}`;
+}
+
+function asJsonObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Luma returned invalid OAuth metadata.");
+  }
+  return value as Record<string, unknown>;
+}
+
+export function validateLumaOAuthDiscovery(
+  resourceMetadataInput: unknown,
+  authorizationMetadataInput: unknown,
+): LumaOAuthDiscovery {
+  const resourceMetadata = asJsonObject(resourceMetadataInput);
+  const authorizationMetadata = asJsonObject(authorizationMetadataInput);
+  if (resourceMetadata.resource !== LUMA_MCP_URL) {
+    throw new Error("Luma advertised an unexpected protected resource.");
+  }
+  const issuers = Array.isArray(resourceMetadata.authorization_servers)
+    ? resourceMetadata.authorization_servers.filter((issuer): issuer is string => typeof issuer === "string")
+    : [];
+  if (!issuers.includes(LUMA_AUTHORIZATION_SERVER)) {
+    throw new Error("Luma did not advertise its supported authorization server.");
+  }
+  if (authorizationMetadata.issuer !== LUMA_AUTHORIZATION_SERVER) {
+    throw new Error("Luma authorization-server metadata has an unexpected issuer.");
+  }
+  if (authorizationMetadata.client_id_metadata_document_supported !== true) {
+    throw new Error("Luma does not advertise Client ID Metadata Document support.");
+  }
+  const responseTypes = authorizationMetadata.response_types_supported;
+  if (Array.isArray(responseTypes) && !responseTypes.includes("code")) {
+    throw new Error("Luma does not advertise the authorization-code flow.");
+  }
+  const authMethods = authorizationMetadata.token_endpoint_auth_methods_supported;
+  if (Array.isArray(authMethods) && !authMethods.includes("none")) {
+    throw new Error("Luma does not allow public OAuth clients.");
+  }
+  const codeChallenges = authorizationMetadata.code_challenge_methods_supported;
+  if (Array.isArray(codeChallenges) && !codeChallenges.includes("S256")) {
+    throw new Error("Luma does not advertise the required S256 PKCE method.");
+  }
+
+  const authorizationEndpoint = new URL(String(authorizationMetadata.authorization_endpoint ?? ""));
+  const tokenEndpoint = new URL(String(authorizationMetadata.token_endpoint ?? ""));
+  if (
+    authorizationEndpoint.protocol !== "https:" ||
+    authorizationEndpoint.origin !== LUMA_AUTHORIZATION_ORIGIN ||
+    authorizationEndpoint.pathname !== "/oauth/consent" ||
+    authorizationEndpoint.username ||
+    authorizationEndpoint.password ||
+    authorizationEndpoint.hash
+  ) {
+    throw new Error("Luma advertised an unsupported authorization endpoint.");
+  }
+  if (
+    tokenEndpoint.protocol !== "https:" ||
+    tokenEndpoint.origin !== LUMA_AUTHORIZATION_SERVER ||
+    tokenEndpoint.pathname !== "/oauth/token" ||
+    tokenEndpoint.username ||
+    tokenEndpoint.password ||
+    tokenEndpoint.search ||
+    tokenEndpoint.hash
+  ) {
+    throw new Error("Luma advertised an unsupported token endpoint.");
+  }
+  return {
+    resource: LUMA_MCP_URL,
+    authorizationEndpoint: authorizationEndpoint.toString(),
+    tokenEndpoint: tokenEndpoint.toString(),
+  };
+}
+
+async function fetchLumaMetadata(url: string, expectedOrigin: string): Promise<Record<string, unknown>> {
+  const parsedUrl = new URL(url);
+  if (
+    parsedUrl.protocol !== "https:" ||
+    parsedUrl.origin !== expectedOrigin ||
+    parsedUrl.search ||
+    parsedUrl.username ||
+    parsedUrl.password ||
+    parsedUrl.hash
+  ) {
+    throw new Error("Luma metadata URL is not trusted.");
+  }
+  const response = await fetch(parsedUrl.toString(), {
+    headers: { Accept: "application/json" },
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`Luma metadata request failed with HTTP ${response.status}.`);
+  return asJsonObject(await response.json());
+}
+
+export async function discoverLumaOAuth(): Promise<LumaOAuthDiscovery> {
+  const challengeResponse = await fetch(LUMA_MCP_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "OpenWindow", version: "0.1.0" },
+      },
+    }),
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (challengeResponse.status !== 401) {
+    throw new Error(`Luma MCP authorization discovery expected HTTP 401, got ${challengeResponse.status}.`);
+  }
+
+  const resourceMetadataUrl = parseResourceMetadataUrl(challengeResponse.headers.get("www-authenticate"));
+  if (!resourceMetadataUrl) throw new Error("Luma MCP did not provide protected-resource metadata.");
+  const resourceMetadata = await fetchLumaMetadata(resourceMetadataUrl, LUMA_MCP_ORIGIN);
+  const issuers = Array.isArray(resourceMetadata.authorization_servers)
+    ? resourceMetadata.authorization_servers.filter((issuer): issuer is string => typeof issuer === "string")
+    : [];
+  const issuer = issuers.find((candidate) => candidate === LUMA_AUTHORIZATION_SERVER);
+  if (!issuer) throw new Error("Luma MCP did not advertise its supported authorization server.");
+  const authorizationMetadataUrl = createAuthorizationServerMetadataUrl(issuer);
+  const authorizationMetadata = await fetchLumaMetadata(
+    authorizationMetadataUrl,
+    LUMA_AUTHORIZATION_SERVER,
+  );
+  return validateLumaOAuthDiscovery(resourceMetadata, authorizationMetadata);
 }
 
 export function signLumaSessionCookie(sessionId: string, secret: string): string {
@@ -247,15 +414,21 @@ function cleanExpiredAuthorizations(): void {
   }
 }
 
-function makeAuthorizationUrl(origin: string, state: string, challenge: string) {
+export function makeLumaAuthorizationUrl(
+  origin: string,
+  state: string,
+  challenge: string,
+  discovery: LumaOAuthDiscovery,
+) {
   const metadata = createLumaClientMetadata(origin);
-  const authorizationUrl = new URL(LUMA_AUTHORIZATION_URL);
+  const authorizationUrl = new URL(discovery.authorizationEndpoint);
   authorizationUrl.searchParams.set("response_type", "code");
   authorizationUrl.searchParams.set("client_id", metadata.client_id);
   authorizationUrl.searchParams.set("redirect_uri", metadata.redirect_uris[0]);
   authorizationUrl.searchParams.set("code_challenge", challenge);
   authorizationUrl.searchParams.set("code_challenge_method", "S256");
   authorizationUrl.searchParams.set("state", state);
+  authorizationUrl.searchParams.set("resource", discovery.resource);
   return { authorizationUrl, metadata };
 }
 
@@ -264,6 +437,7 @@ async function exchangeAuthorizationCode(
   verifier: string,
   clientId: string,
   redirectUri: string,
+  discovery: Pick<LumaOAuthDiscovery, "resource" | "tokenEndpoint">,
 ): Promise<TokenSet> {
   const body = new URLSearchParams({
     grant_type: "authorization_code",
@@ -271,8 +445,9 @@ async function exchangeAuthorizationCode(
     code_verifier: verifier,
     client_id: clientId,
     redirect_uri: redirectUri,
+    resource: discovery.resource,
   });
-  const response = await fetch(LUMA_TOKEN_URL, {
+  const response = await fetch(discovery.tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -293,7 +468,7 @@ async function getAccessToken(sessionId: string): Promise<string> {
   const current = sessions.get(sessionId);
   if (!current) throw new LumaAuthorizationRequiredError();
   if (!current.expiresAt || current.expiresAt > Date.now() + 60_000) return current.accessToken;
-  if (!current.refreshToken) {
+  if (!current.refreshToken || !current.clientId || !current.tokenEndpoint || !current.resource) {
     sessions.delete(sessionId);
     throw new LumaAuthorizationRequiredError();
   }
@@ -301,9 +476,10 @@ async function getAccessToken(sessionId: string): Promise<string> {
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: current.refreshToken,
-    client_id: createLumaClientMetadata(getLastOriginForSession(sessionId)).client_id,
+    client_id: current.clientId,
+    resource: current.resource,
   });
-  const response = await fetch(LUMA_TOKEN_URL, {
+  const response = await fetch(current.tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
@@ -316,6 +492,9 @@ async function getAccessToken(sessionId: string): Promise<string> {
   }
   const updated: TokenSet = {
     accessToken: payload.access_token,
+    clientId: current.clientId,
+    tokenEndpoint: current.tokenEndpoint,
+    resource: current.resource,
     ...(typeof payload.refresh_token === "string"
       ? { refreshToken: payload.refresh_token }
       : current.refreshToken ? { refreshToken: current.refreshToken } : {}),
@@ -325,14 +504,6 @@ async function getAccessToken(sessionId: string): Promise<string> {
   };
   sessions.set(sessionId, updated);
   return updated.accessToken;
-}
-
-const sessionOrigins = new Map<string, string>();
-
-function getLastOriginForSession(sessionId: string): string {
-  const origin = sessionOrigins.get(sessionId);
-  if (!origin) throw new LumaAuthorizationRequiredError();
-  return origin;
 }
 
 async function mcpRequest(
@@ -434,7 +605,9 @@ export function registerLumaRoutes(app: Express): void {
     }
   });
 
-  app.get("/api/luma/connect", (req, res) => {
+  app.get("/api/luma/connect", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
     try {
       const origin = getAppOrigin(req);
       const sessionId = getSessionId(req, true, res);
@@ -443,24 +616,31 @@ export function registerLumaRoutes(app: Express): void {
       cleanExpiredAuthorizations();
       const state = randomBytes(32).toString("base64url");
       const { verifier, challenge } = createPkcePair();
-      const { authorizationUrl, metadata } = makeAuthorizationUrl(origin, state, challenge);
+      const discovery = await discoverLumaOAuth();
+      const { authorizationUrl, metadata } = makeLumaAuthorizationUrl(
+        origin,
+        state,
+        challenge,
+        discovery,
+      );
       pendingAuthorizations.set(state, {
         sessionId,
         verifier,
         clientId: metadata.client_id,
         redirectUri: metadata.redirect_uris[0],
+        tokenEndpoint: discovery.tokenEndpoint,
+        resource: discovery.resource,
         expiresAt: Date.now() + AUTH_TRANSACTION_TTL_MS,
       });
-      sessionOrigins.set(sessionId, origin);
       return res.redirect(302, authorizationUrl.toString());
     } catch {
-      return res.status(503).json({
-        error: "Luma sign-in could not start. Check the app's public URL and session configuration.",
-      });
+      return res.redirect("/?luma=error");
     }
   });
 
   app.get(CALLBACK_PATH, async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    res.setHeader("Referrer-Policy", "no-referrer");
     const state = typeof req.query.state === "string" ? req.query.state : "";
     const transaction = pendingAuthorizations.get(state);
     const secret = process.env.SESSION_SECRET;
@@ -479,9 +659,18 @@ export function registerLumaRoutes(app: Express): void {
         transaction.verifier,
         transaction.clientId,
         transaction.redirectUri,
+        {
+          resource: transaction.resource,
+          tokenEndpoint: transaction.tokenEndpoint,
+        },
       );
-      sessions.set(sessionId, tokenSet);
-      return res.redirect(`${getAppOrigin(req)}/?luma=connected`);
+      sessions.set(sessionId, {
+        ...tokenSet,
+        clientId: transaction.clientId,
+        tokenEndpoint: transaction.tokenEndpoint,
+        resource: transaction.resource,
+      });
+      return res.redirect(`${new URL(transaction.redirectUri).origin}/?luma=connected`);
     } catch {
       return res.redirect("/?luma=error");
     }
@@ -518,7 +707,6 @@ export function registerLumaRoutes(app: Express): void {
       const sessionId = getSessionId(req);
       if (sessionId) {
         sessions.delete(sessionId);
-        sessionOrigins.delete(sessionId);
       }
       clearSessionCookie(res);
       return res.json({ connected: false });
