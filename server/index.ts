@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer as createViteServer } from "vite";
+import { registerLumaRoutes } from "./luma";
 
 const app = express();
 const httpServer = createServer(app);
@@ -23,6 +24,7 @@ let lastSyncedAt: string | null = null;
 
 app.disable("x-powered-by");
 app.use(express.json({ limit: maxPayloadBytes, strict: true }));
+registerLumaRoutes(app);
 
 function validTimeZone(value: unknown): value is string {
   if (typeof value !== "string" || value.length > 100) return false;

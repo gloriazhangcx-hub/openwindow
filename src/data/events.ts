@@ -109,8 +109,47 @@ export const mockEventSource: EventSource = {
 
 export const lumaEventSource: EventSource = {
   kind: "luma",
-  enabled: false,
-  async listEvents() {
-    throw new Error("Luma live search is disabled until its MCP tools, authentication, and response format are verified.");
+  enabled: true,
+  async listEvents(preferences = DEFAULT_PREFERENCES, signal) {
+    const response = await fetch("/api/luma/events", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        keywords: preferences.keywords,
+        cities: preferences.cities,
+        dateHorizonDays: preferences.dateHorizonDays,
+      }),
+      signal,
+    });
+    const payload = await response.json().catch(() => null) as {
+      error?: string;
+      events?: unknown;
+    } | null;
+    if (!response.ok) {
+      throw new Error(payload?.error || "Could not search Luma events.");
+    }
+    if (!Array.isArray(payload?.events) || !payload.events.every(isEventItem)) {
+      throw new Error("Luma returned event data OpenWindow could not read.");
+    }
+    return payload.events;
   },
 };
+
+function isEventItem(value: unknown): value is EventItem {
+  if (!value || typeof value !== "object") return false;
+  const event = value as Record<string, unknown>;
+  return (
+    typeof event.id === "string" &&
+    typeof event.title === "string" &&
+    typeof event.description === "string" &&
+    typeof event.start === "string" &&
+    typeof event.end === "string" &&
+    typeof event.timeZone === "string" &&
+    typeof event.city === "string" &&
+    typeof event.venue === "string" &&
+    Array.isArray(event.topics) &&
+    Array.isArray(event.formats) &&
+    event.source === "Luma" &&
+    typeof event.lumaUrl === "string"
+  );
+}

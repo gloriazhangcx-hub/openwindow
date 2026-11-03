@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark, CalendarDays, Check, ChevronLeft, ChevronRight, ExternalLink, Heart,
   LayoutList, MapPin, Settings2, Sparkles, X, Download, Upload,
   RotateCcw, SlidersHorizontal,
 } from "lucide-react";
-import { useOpenWindow } from "./lib/useOpenWindow";
+import { useOpenWindow, type EventFeedStatus } from "./lib/useOpenWindow";
 import { getVisibleMinuteRange } from "./lib/calendar-grid";
 import {
   atCalendarNoon,
@@ -88,7 +88,9 @@ function App() {
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
   const [savedOnly, setSavedOnly] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
-  const [preferencesOpen, setPreferencesOpen] = useState(false);
+  const [preferencesOpen, setPreferencesOpen] = useState(() =>
+    new URLSearchParams(window.location.search).has("luma"),
+  );
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
 
@@ -277,7 +279,7 @@ function App() {
       </main>
 
       {activeEvent && <EventModal event={activeEvent} availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"} saved={model.savedEventIds.includes(activeEvent.id)} onSave={() => saveEvent(activeEvent)} onClose={() => setActiveEvent(null)} />}
-      {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
+      {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} eventFeedStatus={model.eventFeedStatus} onRefreshEvents={model.refreshEvents} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
       {toast && <div role="status" className="toast">{toast}</div>}
     </div>
   );
@@ -489,8 +491,9 @@ function EventModal({ event, availability, saved, onSave, onClose }: {
   </div>;
 }
 
-function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose, onImport, onClearImport }: {
+function PreferencesModal({ preferences, syncStatus, busyOrigin, eventFeedStatus, onRefreshEvents, onSave, onClose, onImport, onClearImport }: {
   preferences: Preferences; syncStatus: { lastSyncedAt: string | null; sourceCount: number; isStale: boolean };
+  eventFeedStatus: EventFeedStatus; onRefreshEvents: () => Promise<void>;
   busyOrigin: string; onSave: (preferences: Preferences) => void; onClose: () => void;
   onImport: (file?: File) => Promise<void>; onClearImport: () => void;
 }) {
@@ -528,6 +531,8 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
         <h3 className="pref-section-title">Optional format defaults</h3>
         <div className="pref-chips">{FORMATS.map((format) => <button type="button" key={format} aria-pressed={formats.includes(format)} className={`chip ${formats.includes(format) ? "active" : ""}`} onClick={() => toggleFormat(format)}>{formats.includes(format) && <Check size={10} style={{ marginRight: 3, verticalAlign: "-1px" }} />}{format}</button>)}</div>
 
+      <LumaConnectionPanel eventFeedStatus={eventFeedStatus} onRefreshEvents={onRefreshEvents} />
+
         <h3 className="pref-section-title">Calendar context</h3>
         <div className={`status-box ${syncStatus.isStale ? "warning" : ""}`}>
           <strong>{busyOrigin}</strong><br />{syncText}
@@ -552,6 +557,129 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
       </div>
     </section>
   </div>;
+}
+
+function LumaConnectionPanel({ eventFeedStatus, onRefreshEvents }: {
+  eventFeedStatus: EventFeedStatus;
+  onRefreshEvents: () => Promise<void>;
+}) {
+  const [checking, setChecking] = useState(true);
+  const [connected, setConnected] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(() =>
+    new URLSearchParams(window.location.search).get("luma") === "error"
+      ? "Luma sign-in did not complete. You can try connecting again."
+      : "",
+  );
+  const [tools, setTools] = useState<Array<{
+    name: string;
+    inputProperties: Array<{ name: string; type: string; required: boolean }>;
+  }>>([]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/luma/status")
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not check Luma connection.");
+        return response.json() as Promise<{ connected: boolean }>;
+      })
+      .then((result) => {
+        if (active) setConnected(Boolean(result.connected));
+      })
+      .catch((reason: unknown) => {
+        if (active) setError(reason instanceof Error ? reason.message : "Could not check Luma connection.");
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const inspectTools = async () => {
+    setBusy(true);
+    setError("");
+    setTools([]);
+    try {
+      const response = await fetch("/api/luma/tools", { headers: { Accept: "application/json" } });
+      const payload = await response.json() as {
+        error?: string;
+        tools?: Array<{
+          name: string;
+          inputProperties: Array<{ name: string; type: string; required: boolean }>;
+        }>;
+      };
+      if (!response.ok) {
+        if (response.status === 401) setConnected(false);
+        throw new Error(payload.error || "Could not inspect Luma's search tools.");
+      }
+      const discovered = (payload.tools ?? []).map((tool) => ({
+        name: tool.name,
+        inputProperties: Array.isArray(tool.inputProperties) ? tool.inputProperties : [],
+      }));
+      setTools(discovered);
+      if (discovered.length === 0) {
+        setError("Luma is connected, but no public event-search tool was identified.");
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not inspect Luma's search tools.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const disconnect = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/luma/disconnect", { method: "POST" });
+      if (!response.ok) throw new Error("Could not disconnect Luma.");
+      setConnected(false);
+      setTools([]);
+      await onRefreshEvents();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Could not disconnect Luma.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <>
+    <h3 className="pref-section-title">Event source</h3>
+    <div className={`status-box ${eventFeedStatus.state === "error" ? "warning" : ""}`} role="status" aria-live="polite">
+      <strong>{checking ? "Checking Luma connection…" : connected ? "Luma account connected" : "Demo events active"}</strong>
+      <br />
+      {connected
+        ? eventFeedStatus.message
+        : "Connect Luma to search public events. Demo listings are shown until then."}
+    </div>
+    <div className="luma-actions">
+      {!connected
+        ? checking
+          ? <button type="button" className="button secondary" disabled>Checking…</button>
+          : <a className="button secondary" href="/api/luma/connect">Connect Luma</a>
+        : <>
+          <button type="button" className="button secondary" onClick={() => void inspectTools()} disabled={busy}>
+            {busy ? "Checking…" : "Inspect search tools"}
+          </button>
+          <button type="button" className="button secondary" onClick={() => { setBusy(true); void onRefreshEvents().finally(() => setBusy(false)); }} disabled={busy}>
+            {busy ? "Refreshing…" : "Refresh events"}
+          </button>
+          <button type="button" className="button secondary" onClick={() => void disconnect()} disabled={busy}>
+            Disconnect
+          </button>
+        </>}
+    </div>
+    {error && <p className="import-message error" role="alert">{error}</p>}
+    {tools.length > 0 && <ul className="luma-tool-list" aria-label="Luma public event search tools">
+      {tools.map((tool) => <li key={tool.name}>
+        <strong>{tool.name}</strong>
+        {tool.inputProperties.length > 0 && <span>
+          Inputs: {tool.inputProperties.map(({ name, type, required }) => `${name}${required ? "*" : ""} (${type})`).join(", ")}
+        </span>}
+      </li>)}
+    </ul>}
+    <p className="filter-note">This first connection test keeps tokens on the server. It resets when the server restarts.</p>
+  </>;
 }
 
 export default App;
