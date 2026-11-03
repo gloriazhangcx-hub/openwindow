@@ -4,7 +4,13 @@ import {
   randomBytes,
   timingSafeEqual,
 } from "node:crypto";
+import type { EventItem } from "../src/types";
 import type { Express, Request, Response } from "express";
+import {
+  buildLumaSearchPlans,
+  normalizeLumaSearchResult,
+  validateSearchPreferences,
+} from "./luma-events";
 
 const LUMA_MCP_URL = "https://mcp.luma.com";
 const LUMA_MCP_ORIGIN = new URL(LUMA_MCP_URL).origin;
@@ -541,7 +547,12 @@ async function mcpRequest(
   };
 }
 
-async function listLumaTools(accessToken: string): Promise<McpTool[]> {
+type McpSessionContext = {
+  sessionId?: string;
+  protocolVersion: string;
+};
+
+async function initializeLumaMcpSession(accessToken: string): Promise<McpSessionContext> {
   const initialized = await mcpRequest(accessToken, {
     jsonrpc: "2.0",
     id: 1,
@@ -562,15 +573,23 @@ async function listLumaTools(accessToken: string): Promise<McpTool[]> {
     { jsonrpc: "2.0", method: "notifications/initialized" },
     { sessionId: initialized.sessionId, protocolVersion },
   );
-  const sessionId = initializedNotification.sessionId ?? initialized.sessionId;
+  return {
+    sessionId: initializedNotification.sessionId ?? initialized.sessionId,
+    protocolVersion,
+  };
+}
 
+async function listLumaTools(
+  accessToken: string,
+  context: McpSessionContext,
+): Promise<McpTool[]> {
   const collected: McpTool[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 10; page += 1) {
     const response = await mcpRequest(
       accessToken,
       { jsonrpc: "2.0", id: page + 2, method: "tools/list", params: cursor ? { cursor } : {} },
-      { sessionId, protocolVersion },
+      context,
     );
     const result = response.message?.result;
     const tools = result?.tools;
@@ -582,6 +601,86 @@ async function listLumaTools(accessToken: string): Promise<McpTool[]> {
     if (!cursor) break;
   }
   return collected;
+}
+
+function buildSearchArguments(
+  tool: McpTool,
+  plan: { query: string; location?: string },
+  after: string,
+  before: string,
+): Record<string, unknown> {
+  const schema = tool.inputSchema && typeof tool.inputSchema === "object"
+    ? tool.inputSchema
+    : {};
+  const properties = schema.properties && typeof schema.properties === "object"
+    ? schema.properties as Record<string, unknown>
+    : {};
+  if (!("query" in properties)) {
+    throw new Error("Luma's search_events tool does not advertise its required query input.");
+  }
+
+  const args: Record<string, unknown> = { query: plan.query };
+  if (plan.location && "location" in properties) args.location = plan.location;
+  if ("after" in properties) args.after = after;
+  if ("before" in properties) args.before = before;
+
+  const required = Array.isArray(schema.required)
+    ? schema.required.filter((item): item is string => typeof item === "string")
+    : [];
+  if (required.some((name) => !(name in args))) {
+    throw new Error("Luma's search_events tool has an unsupported required input.");
+  }
+  return args;
+}
+
+async function searchLumaEvents(
+  accessToken: string,
+  preferences: ReturnType<typeof validateSearchPreferences>,
+): Promise<EventItem[]> {
+  const context = await initializeLumaMcpSession(accessToken);
+  const tools = await listLumaTools(accessToken, context);
+  const searchTool = tools.find((tool) => tool.name === "search_events");
+  if (!searchTool) throw new Error("Luma's search_events tool is not available.");
+
+  const plans = buildLumaSearchPlans(preferences.keywords, preferences.cities);
+  const now = Date.now();
+  const after = new Date(now).toISOString();
+  const before = new Date(now + preferences.dateHorizonDays * 24 * 60 * 60 * 1000).toISOString();
+  const results: EventItem[][] = [];
+  for (let offset = 0; offset < plans.length; offset += 3) {
+    const batch = await Promise.all(plans.slice(offset, offset + 3).map(async (plan, index) => {
+      const call = await mcpRequest(
+        accessToken,
+        {
+          jsonrpc: "2.0",
+          id: 100 + offset + index,
+          method: "tools/call",
+          params: {
+            name: searchTool.name,
+            arguments: buildSearchArguments(searchTool, plan, after, before),
+          },
+        },
+        context,
+      );
+      const result = call.message?.result;
+      if (!result || result.isError === true) {
+        throw new Error("Luma's search_events tool returned an error.");
+      }
+      return normalizeLumaSearchResult(result, plan.location);
+    }));
+    results.push(...batch);
+  }
+
+  const startLimit = now - 60 * 60 * 1000;
+  const endLimit = Date.parse(before);
+  const unique = new Map<string, EventItem>();
+  for (const event of results.flat()) {
+    const start = Date.parse(event.start);
+    if (start < startLimit || start > endLimit) continue;
+    unique.set(event.id, event);
+    if (unique.size >= 150) break;
+  }
+  return [...unique.values()].sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 }
 
 export function registerLumaRoutes(app: Express): void {
@@ -602,6 +701,32 @@ export function registerLumaRoutes(app: Express): void {
       return res.json({ connected: Boolean(sessionId && sessions.has(sessionId)) });
     } catch {
       return res.status(503).json({ error: "Luma connection is not configured." });
+    }
+  });
+
+  app.post("/api/luma/events", async (req, res) => {
+    res.setHeader("Cache-Control", "no-store");
+    let preferences: ReturnType<typeof validateSearchPreferences>;
+    try {
+      preferences = validateSearchPreferences(req.body);
+    } catch (error) {
+      return res.status(400).json({
+        error: error instanceof Error ? error.message : "Invalid Luma search preferences.",
+      });
+    }
+
+    try {
+      const sessionId = getSessionId(req);
+      if (!sessionId) return res.status(401).json({ error: "Connect Luma before searching events." });
+      const accessToken = await getAccessToken(sessionId);
+      const events = await searchLumaEvents(accessToken, preferences);
+      return res.json({ events, fetchedAt: new Date().toISOString() });
+    } catch (error) {
+      if (error instanceof LumaAuthorizationRequiredError) {
+        return res.status(401).json({ error: "Luma sign-in expired. Reconnect and try again." });
+      }
+      console.error("[luma] Public event search failed.");
+      return res.status(502).json({ error: "Luma event search failed; demo events remain available." });
     }
   });
 
@@ -682,7 +807,8 @@ export function registerLumaRoutes(app: Express): void {
       const sessionId = getSessionId(req);
       if (!sessionId) return res.status(401).json({ error: "Connect Luma first." });
       const accessToken = await getAccessToken(sessionId);
-      const tools = await listLumaTools(accessToken);
+      const context = await initializeLumaMcpSession(accessToken);
+      const tools = await listLumaTools(accessToken, context);
       const candidates = summarizePublicEventSearchTools(tools);
       console.info("[luma] Read-only event-search tool signatures:", JSON.stringify(candidates));
       return res.json({

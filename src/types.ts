@@ -58,5 +58,5 @@ export interface CalendarSyncStatus {
 export interface EventSource {
   readonly kind: "mock" | "luma";
   readonly enabled: boolean;
-  listEvents(): Promise<EventItem[]>;
+  listEvents(preferences?: Preferences, signal?: AbortSignal): Promise<EventItem[]>;
 }

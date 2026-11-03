@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { DEFAULT_PREFERENCES, demoBusyIntervals, mockEventSource } from "../data/events";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_PREFERENCES, demoBusyIntervals, demoEvents, lumaEventSource } from "../data/events";
 import { getAvailability } from "./calendar";
 import type { BusyInterval, CalendarSyncStatus, EventItem, Preferences } from "../types";
 
@@ -10,6 +10,12 @@ const STORAGE_KEYS = {
 } as const;
 
 type BusyOrigin = "Demo sample" | "Imported locally" | "Not synced";
+
+export type EventFeedStatus = {
+  state: "checking" | "searching" | "demo" | "live" | "empty" | "error";
+  count: number;
+  message: string;
+};
 
 function readStored<T>(key: string, fallback: T): T {
   try {
@@ -65,6 +71,7 @@ function readPreferences(): Preferences {
 
 export interface OpenWindowModel {
   events: EventItem[];
+  eventFeedStatus: EventFeedStatus;
   busyIntervals: BusyInterval[] | null;
   busyOrigin: BusyOrigin;
   savedEventIds: string[];
@@ -72,13 +79,21 @@ export interface OpenWindowModel {
   syncStatus: CalendarSyncStatus;
   availabilityByEvent: Record<string, ReturnType<typeof getAvailability>>;
   saveEvent: (eventId: string) => void;
+  refreshEvents: () => Promise<void>;
   updatePreferences: (preferences: Preferences) => void;
   importBusyIntervals: (payload: unknown) => number;
   clearImportedBusyIntervals: () => void;
 }
 
 export function useOpenWindow(): OpenWindowModel {
-  const [events, setEvents] = useState<EventItem[]>([]);
+  const [events, setEvents] = useState<EventItem[]>(demoEvents);
+  const [eventFeedStatus, setEventFeedStatus] = useState<EventFeedStatus>({
+    state: "checking",
+    count: 0,
+    message: "Checking Luma connection…",
+  });
+  const latestFeedRequest = useRef(0);
+  const feedController = useRef<AbortController | null>(null);
   const [busyIntervals, setBusyIntervals] = useState<BusyInterval[] | null>(() => {
     const stored = localStorage.getItem(STORAGE_KEYS.busy);
     if (stored) {
@@ -111,9 +126,69 @@ export function useOpenWindow(): OpenWindowModel {
   );
   const [preferences, setPreferences] = useState<Preferences>(readPreferences);
 
+  const refreshEvents = useCallback(async () => {
+    const requestId = ++latestFeedRequest.current;
+    feedController.current?.abort();
+    const controller = new AbortController();
+    feedController.current = controller;
+    setEventFeedStatus({
+      state: "searching",
+      count: 0,
+      message: "Checking Luma and searching your event preferences…",
+    });
+
+    const updateIfCurrent = (update: () => void) => {
+      if (requestId === latestFeedRequest.current && !controller.signal.aborted) update();
+    };
+
+    try {
+      const statusResponse = await fetch("/api/luma/status", {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (!statusResponse.ok) throw new Error("Could not check the Luma connection.");
+      const connection = await statusResponse.json() as { connected?: boolean };
+      if (!connection.connected) {
+        updateIfCurrent(() => {
+          setEvents(demoEvents);
+          setEventFeedStatus({
+            state: "demo",
+            count: demoEvents.length,
+            message: "Demo listings are active. Connect Luma to search live events.",
+          });
+        });
+        return;
+      }
+
+      const liveEvents = await lumaEventSource.listEvents(preferences, controller.signal);
+      updateIfCurrent(() => {
+        setEvents(liveEvents);
+        setEventFeedStatus({
+          state: liveEvents.length ? "live" : "empty",
+          count: liveEvents.length,
+          message: liveEvents.length
+            ? `Showing ${liveEvents.length} live Luma event${liveEvents.length === 1 ? "" : "s"}.`
+            : "Luma search found no events for these preferences and dates.",
+        });
+      });
+    } catch (error) {
+      if (controller.signal.aborted || requestId !== latestFeedRequest.current) return;
+      setEvents(demoEvents);
+      setEventFeedStatus({
+        state: "error",
+        count: demoEvents.length,
+        message: `${error instanceof Error ? error.message : "Luma search failed."} Demo listings remain active.`,
+      });
+    }
+  }, [preferences]);
+
   useEffect(() => {
-    void mockEventSource.listEvents().then(setEvents);
-  }, []);
+    void refreshEvents();
+    return () => {
+      latestFeedRequest.current += 1;
+      feedController.current?.abort();
+    };
+  }, [refreshEvents]);
 
   const syncStatus = useMemo<CalendarSyncStatus>(
     () => ({
@@ -171,6 +246,7 @@ export function useOpenWindow(): OpenWindowModel {
 
   return {
     events,
+    eventFeedStatus,
     busyIntervals,
     busyOrigin,
     savedEventIds,
@@ -178,6 +254,7 @@ export function useOpenWindow(): OpenWindowModel {
     syncStatus,
     availabilityByEvent,
     saveEvent,
+    refreshEvents,
     updatePreferences,
     importBusyIntervals,
     clearImportedBusyIntervals,

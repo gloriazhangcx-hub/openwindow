@@ -27,9 +27,10 @@ npm start
 - Topic and format labels are separate; the deterministic classifier prefers recognized native labels and otherwise uses title/description keyword rules. Unclassified events remain unlabeled.
 - Saved events, preferences, and locally imported busy intervals use browser `localStorage`.
 - Event details include a direct `.ics` download; downloading is an explicit user action.
-- The mock source remains active while the app-side Luma OAuth flow and read-only MCP tool discovery are being validated.
+- Luma's read-only `search_events` MCP tool can search by saved keyword, city, and date horizon after account connection.
+- Demo listings remain available whenever Luma is disconnected or a live search fails; successful searches replace them with mapped Luma results.
 
-The demo listings are fictional sample data. Their “Open on Luma” links go to the Luma homepage, not a real event registration page. The app discovers the OAuth endpoints from Luma's MCP challenge and published metadata, then uses a Client ID Metadata Document, authorization-code/PKCE, and the MCP resource parameter. After sign-in it can inspect read-only MCP tool definitions. Public event search and result mapping are not enabled until the actual Luma tool schema and response have been verified. OAuth tokens stay in server memory and are cleared when the server restarts. No live search or registration data is claimed.
+The demo listings are fictional sample data. Their “Open on Luma” links go to the Luma homepage, not a real event registration page. The app discovers OAuth endpoints from Luma's MCP challenge and published metadata, then uses a Client ID Metadata Document, authorization-code/PKCE, and the MCP resource parameter. Once connected, the server only calls the read-only `search_events` tool, maps recognized event responses, and keeps OAuth tokens off the browser. Keyword matching is delegated to Luma's search tool; OpenWindow does not call a separate AI service. Topic and format labels use the app's deterministic classifier. Tokens stay in server memory and are cleared when the server restarts. The live search path still needs an end-to-end run with the connected account to confirm Luma's result payload.
 
 Luma sign-in requires `SESSION_SECRET` and a public HTTPS app origin. Development uses `REPLIT_DEV_DOMAIN`; production must set `OPENWINDOW_PUBLIC_URL` to the app's canonical origin.
 
@@ -93,7 +94,7 @@ npm run build
 
 ## Known limitations and next steps
 
-- Event listings remain demo data until Luma sign-in, public search, and event mapping are verified end to end.
+- Luma event search and mapping are implemented; verify the provider response end to end with a connected account before relying on live results.
 - Shortcut uploads are in-memory and do not currently drive the browser conflict view.
 - There is no multi-user authentication or persistent server database in this first version.
 - Direct Apple Calendar writeback is out of scope. Use the explicit `.ics` download if you choose to add an event.

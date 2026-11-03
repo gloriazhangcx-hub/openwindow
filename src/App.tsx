@@ -4,7 +4,7 @@ import {
   LayoutList, MapPin, Settings2, Sparkles, X, Download, Upload,
   RotateCcw, SlidersHorizontal,
 } from "lucide-react";
-import { useOpenWindow } from "./lib/useOpenWindow";
+import { useOpenWindow, type EventFeedStatus } from "./lib/useOpenWindow";
 import { getVisibleMinuteRange } from "./lib/calendar-grid";
 import {
   atCalendarNoon,
@@ -279,7 +279,7 @@ function App() {
       </main>
 
       {activeEvent && <EventModal event={activeEvent} availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"} saved={model.savedEventIds.includes(activeEvent.id)} onSave={() => saveEvent(activeEvent)} onClose={() => setActiveEvent(null)} />}
-      {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
+      {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} eventFeedStatus={model.eventFeedStatus} onRefreshEvents={model.refreshEvents} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
       {toast && <div role="status" className="toast">{toast}</div>}
     </div>
   );
@@ -491,8 +491,9 @@ function EventModal({ event, availability, saved, onSave, onClose }: {
   </div>;
 }
 
-function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose, onImport, onClearImport }: {
+function PreferencesModal({ preferences, syncStatus, busyOrigin, eventFeedStatus, onRefreshEvents, onSave, onClose, onImport, onClearImport }: {
   preferences: Preferences; syncStatus: { lastSyncedAt: string | null; sourceCount: number; isStale: boolean };
+  eventFeedStatus: EventFeedStatus; onRefreshEvents: () => Promise<void>;
   busyOrigin: string; onSave: (preferences: Preferences) => void; onClose: () => void;
   onImport: (file?: File) => Promise<void>; onClearImport: () => void;
 }) {
@@ -530,7 +531,7 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
         <h3 className="pref-section-title">Optional format defaults</h3>
         <div className="pref-chips">{FORMATS.map((format) => <button type="button" key={format} aria-pressed={formats.includes(format)} className={`chip ${formats.includes(format) ? "active" : ""}`} onClick={() => toggleFormat(format)}>{formats.includes(format) && <Check size={10} style={{ marginRight: 3, verticalAlign: "-1px" }} />}{format}</button>)}</div>
 
-      <LumaConnectionPanel />
+      <LumaConnectionPanel eventFeedStatus={eventFeedStatus} onRefreshEvents={onRefreshEvents} />
 
         <h3 className="pref-section-title">Calendar context</h3>
         <div className={`status-box ${syncStatus.isStale ? "warning" : ""}`}>
@@ -558,7 +559,10 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
   </div>;
 }
 
-function LumaConnectionPanel() {
+function LumaConnectionPanel({ eventFeedStatus, onRefreshEvents }: {
+  eventFeedStatus: EventFeedStatus;
+  onRefreshEvents: () => Promise<void>;
+}) {
   const [checking, setChecking] = useState(true);
   const [connected, setConnected] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -631,6 +635,7 @@ function LumaConnectionPanel() {
       if (!response.ok) throw new Error("Could not disconnect Luma.");
       setConnected(false);
       setTools([]);
+      await onRefreshEvents();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not disconnect Luma.");
     } finally {
@@ -640,12 +645,12 @@ function LumaConnectionPanel() {
 
   return <>
     <h3 className="pref-section-title">Event source</h3>
-    <div className="status-box" role="status" aria-live="polite">
+    <div className={`status-box ${eventFeedStatus.state === "error" ? "warning" : ""}`} role="status" aria-live="polite">
       <strong>{checking ? "Checking Luma connection…" : connected ? "Luma account connected" : "Demo events active"}</strong>
       <br />
       {connected
-        ? "Demo listings remain active until Luma’s public event search is verified."
-        : "Connect Luma to inspect its read-only public event-search tools."}
+        ? eventFeedStatus.message
+        : "Connect Luma to search public events. Demo listings are shown until then."}
     </div>
     <div className="luma-actions">
       {!connected
@@ -655,6 +660,9 @@ function LumaConnectionPanel() {
         : <>
           <button type="button" className="button secondary" onClick={() => void inspectTools()} disabled={busy}>
             {busy ? "Checking…" : "Inspect search tools"}
+          </button>
+          <button type="button" className="button secondary" onClick={() => { setBusy(true); void onRefreshEvents().finally(() => setBusy(false)); }} disabled={busy}>
+            {busy ? "Refreshing…" : "Refresh events"}
           </button>
           <button type="button" className="button secondary" onClick={() => void disconnect()} disabled={busy}>
             Disconnect
