@@ -25,3 +25,9 @@
 ## Input note
 
 The uploaded draft is the source for root `PLAN.md`; it was not rewritten from scratch.
+
+## PR record
+
+- PR: https://github.com/gloriazhangcx-hub/openwindow/pull/10 (open for user review; not merged).
+- Branch base: canonical GitHub `main` at the start of this issue.
+- Reconciliation: fetched all GitHub refs under a separate remote; local and GitHub histories have no common ancestor, so no existing branch was merged or rewritten.
