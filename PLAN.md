@@ -1,71 +1,82 @@
 # OpenWindow — PLAN.md
 
-> **Planning document for course submission.** Adapted from the original OpenWindow product plan. This file is being prepared after initial prototyping; it must not be represented as a plan merged before development. Preserve the original Word plan and Git history as evidence. Confirm implementation choices against the actual Replit repository before merging.
+> **Course development plan (November 2026).** Adapted from the original *OpenWindow Product Planning Document — MVP v0.1* (October 2026), retained unchanged in `docs/`. Initial Discover/Calendar prototyping and GitHub PRs preceded this Markdown version. This document does **not** claim to be the repository's first PR. The sections below describe the intended formal build; complete **Plan vs. Reality** at submission without rewriting the original intentions.
 
 ## 1. Pitch
-I'm building **OpenWindow**, a personal event discovery and tracking app, because I often find interesting AI, tech, and social-impact events on Luma but have to compare them manually with my calendar. I expect to check it several times a week this semester, save events I might attend, and track my choices. Other students and young professionals can use it too.
 
-## 2. Features — user stories in intended build order
-1. **Accounts:** As a user, I want to sign up, log in, and log out so my saved events remain private.
-2. **Data model:** As a user, I want my events organized by topic so I can keep a structured collection.
-3. **Event CRUD:** As a user, I want to add, view details, edit, and delete my saved events (with confirmation) so I can maintain my own event list.
-4. **Validation:** As a user, I want clear errors when a required title, start time, or end time is missing or invalid so I don't save unusable events.
-5. **Stars:** As a user, I want to star events and see a Starred view so I can quickly find my favorites.
-6. **Find things:** As a user, I want to search by title, filter by topic/format/availability, and sort by event date so I can find useful events.
-7. **Dashboard:** As a user, I want to see total saved events, starred events, conflict-free events, and a chart of events by topic so I can understand my collection.
-8. **Custom — Calendar view:** As a user, I want the existing Day, Week, and Month calendar views to show commitments as solid blocks and potential events as dashed blocks so I can see where events fit.
-9. **Custom — Conflict detection:** As a user, I want potential time overlaps flagged without hiding events so I can decide whether to rearrange my schedule.
-10. **Custom — Calendar export:** As a user, I want to download an `.ics` file for an event so I can add it to my calendar explicitly.
+**OpenWindow — Discover what you could do, alongside what you already plan to do.** I'm building a calendar-aware event discovery and tracking app because interesting AI, consumer-tech, career, and social-impact events are scattered across platforms, and checking them against my schedule is tedious. I expect to use it throughout the semester to discover events, save possibilities, and decide what to attend. It may also help other MBA students and young professionals. OpenWindow **informs rather than ranks**: conflicting events stay visible, and users decide for themselves.
 
-The course MVP may use manually entered real events; Luma MCP and Apple Calendar automation are not required for grading. At the time of this plan revision, the prototype includes a Luma OAuth flow and a `search_events` call path in open draft PR #8. OAuth and tool discovery succeeded, but actual event records and their response mapping have not been verified end to end; the Luma session is held in server memory and resets after a server restart. The Apple Shortcut upload endpoint is also a prototype and is not connected to the browser conflict view. Demo events must be labeled as demo data. I will enter at least five real events of my own before submission.
+## 2. Features — ordered user stories
 
-## 3. Database design
-Use a relational database with user-level access controls. The schema below is the **intended design**, not a claim about what has already been built.
+The first seven stories are the required course spine; the last three are OpenWindow-specific features already explored in the prototype. All must work with real user-owned data where relevant.
 
-| Table | Columns (name: type) | Primary key | Relationships |
-|---|---|---|---|
-| `users` | `id: uuid`, `email: text`, `created_at: timestamp` | `id` | One user has many saved events, busy intervals, and stars; authentication may be managed by the hosting/auth provider. |
-| `topics` | `id: uuid`, `name: text` | `id` | Topics can be assigned to many events through `event_topics`. |
-| `events` | `id: uuid`, `user_id: uuid`, `title: text`, `description: text`, `location: text`, `starts_at: timestamp`, `ends_at: timestamp`, `source_url: text`, `created_at: timestamp` | `id` | Each event belongs to one user and can have multiple topics and formats through junction tables. |
-| `event_topics` | `event_id: uuid`, `topic_id: uuid` | Composite (`event_id`, `topic_id`) | Junction table: events ↔ topics; each event can have multiple topics. |
-| `event_formats` | `event_id: uuid`, `format: text` | Composite (`event_id`, `format`) | Junction table: events ↔ formats; each event can have multiple formats. |
-| `stars` | `user_id: uuid`, `event_id: uuid`, `created_at: timestamp` | Composite (`user_id`, `event_id`) | Junction table: users ↔ events; each user-event pair can be starred once. |
-| `busy_intervals` | `id: uuid`, `user_id: uuid`, `starts_at: timestamp`, `ends_at: timestamp`, `source: text` | `id` | Each interval belongs to one user; used for conflict checks. |
+1. **Accounts.** As a user, I can sign up, log in, and log out, so my saved events and calendar information are private and persist across sessions.
+2. **Relational data.** As a user, I can keep events with multiple **Topic** and **Format** labels and associated personal busy intervals, so the same data supports List and Calendar views.
+3. **Event CRUD.** As a user, I can create a personal event, list my events, open details, edit, and delete with confirmation; I can also save an event discovered through a source such as Luma without editing the public source record.
+4. **Validation.** As a user, I receive clear errors for missing title/start/end times, invalid date ranges, or malformed URLs rather than saving unusable entries.
+5. **Stars.** As a user, I can star/unstar an event and see a Starred view. Stars use a dedicated user–event junction table, separate from simply saving an event.
+6. **Find things.** As a user, I can search event titles, filter by multi-select Topic, multi-select Format, and availability (All / Available / Conflict / Unknown), and sort by date. Filters persist when switching List and Calendar views.
+7. **Dashboard.** As a user, I see at least one chart (my saved events by Topic) and three calculated figures (saved count, starred count, and conflict-free count), all derived from my own database records.
+8. **Custom: Calendar overlay.** As a user, I see existing commitments as **solid** blocks and possible events as **dashed** blocks at their actual times, with day/week/month navigation and event details.
+9. **Custom: Conflict detection.** As a user, I see Available, Conflict, or Unknown based on time overlaps, without automatically hiding events. The comparison uses `event.start < busy.end && event.end > busy.start`, handles time zones, and shows Unknown when data is insufficient.
+10. **Custom: Explicit calendar export.** As a user, I can download an event as `.ics` and choose whether to add it to my calendar; the app never writes proposed events silently.
 
-For the MVP, events support multiple topics and formats, matching the current `EventItem` model. Store them through `event_topics` and `event_formats`. All queries for private records must be scoped to the authenticated user. Validate `ends_at > starts_at`.
+**Real-use criterion:** enter at least five genuine events relevant to my semester. Demo fixtures must be visibly labeled and must not be presented as live Luma data. Live Luma discovery and automatic Apple Calendar sync remain optional integrations, not dependencies of the graded core.
 
-## 4. Required automated tests
-- **Data isolation:** Given User A has saved an event and User B is logged in, when User B requests their event list or User A's event detail, then User A's event must not be visible or accessible.
-- **Dashboard calculation:** Given a user has five saved events and two starred events, when the dashboard loads, then it displays `Saved events = 5` and `Starred events = 2` based on database records.
+## 3. Database design (intended schema)
 
-For each test, record a plain-English explanation, a real failing run after temporarily introducing a bug (red screenshot), a passing run after fixing it (green screenshot), and one change that would break the test. Save evidence with the relevant PR.
+Use a relational database and server-enforced user ownership. Exact SQL types and authentication provider will be finalized against the existing Replit stack before the first implementation PR. Times are stored as timezone-aware timestamps. Public source events and user-owned records must remain distinct.
 
-## 5. Technologies
-- **Coding agent — Replit Agent:** Builds features iteratively while I review functionality and PRs.
-- **Code hosting — GitHub:** Tracks Issues, feature branches, prompts, PRs, and merges; nothing new is committed directly to `main`.
-- **Web stack — React + TypeScript + existing CSS:** Reuse the existing responsive OpenWindow styling; do not migrate to Tailwind for the course MVP.
-- **Calendar component — existing OpenWindow calendar:** Reuse the current custom calendar, which already supports day, week, and month views and the required solid/dashed event styling; do not replace it with FullCalendar for this course MVP.
-- **Database/auth — existing Replit-compatible SQL database and authentication solution, to be verified in the repository:** Stores users, events, topics, stars, and busy intervals with account isolation. Prefer existing working infrastructure over migrating stacks.
-- **Hosting — Replit deployment:** Keeps a live URL accessible for the demo and submission.
-- **Luma MCP / Apple Shortcuts — deferred for grading:** Keep existing integration prototypes outside the required course scope; current Luma status is recorded in §2.
+| Table | Columns (type; `PK` / `FK` noted) | Relationships / purpose |
+|---|---|---|
+| `users` | `id UUID PK`, `email TEXT UNIQUE NOT NULL`, `created_at TIMESTAMPTZ` | One user owns many personal events, busy intervals, and stars; auth credentials handled by chosen provider. |
+| `events` | `id UUID PK`, `user_id UUID FK`, `title TEXT`, `description TEXT`, `starts_at TIMESTAMPTZ`, `ends_at TIMESTAMPTZ`, `location TEXT`, `source_url TEXT`, `source_event_id TEXT NULL`, `created_at TIMESTAMPTZ` | User-owned saved/manual events. `user_id → users.id`. A source ID is optional; no source data is treated as user-private until saved. |
+| `topics` | `id UUID PK`, `name TEXT UNIQUE` | Shared controlled vocabulary. |
+| `event_topics` | `event_id UUID FK`, `topic_id UUID FK`, composite PK | Many-to-many: events ↔ topics; preserve original multi-label filters. |
+| `formats` | `id UUID PK`, `name TEXT UNIQUE` | Shared format vocabulary (workshop, networking, etc.). |
+| `event_formats` | `event_id UUID FK`, `format_id UUID FK`, composite PK | Many-to-many: events ↔ formats. |
+| `stars` | `user_id UUID FK`, `event_id UUID FK`, `created_at TIMESTAMPTZ`, composite PK (`user_id`, `event_id`) | A user can star a saved event once; verify ownership on every write/read. |
+| `busy_intervals` | `id UUID PK`, `user_id UUID FK`, `starts_at TIMESTAMPTZ`, `ends_at TIMESTAMPTZ`, `source TEXT`, `created_at TIMESTAMPTZ` | User-private calendar busy windows for conflict checks; avoid collecting event titles, attendees, or notes. |
 
-## 6. Design
-A clean, light, minimalist productivity interface inspired by **Luma's event cards** and **Google Calendar's weekly schedule**. Preserve the existing CSS and purple/yellow palette, clear typography, and accessible status labels. Keep **Discover/List** and **Calendar** as switchable views with shared Topic, Format, and Availability filters. Reuse the existing Day/Week/Month calendar component: commitments have **solid** blocks and potential events have **dashed** outlines. Add a simple **My Events** area for CRUD, stars, and dashboard stats. Do not assign AI priority scores or automatically hide conflicts.
+Require `ends_at > starts_at`. All event, star, and busy-interval reads/writes must be scoped to the authenticated user; UI filtering alone is insufficient. A user may have multiple topics and formats per event. Public Luma records can be loaded through an adapter, with a clearly marked mock fallback, rather than copied indiscriminately into private records.
 
-## 7. Risks and cuts
-**Biggest risk:** adding account-scoped database/auth and manual CRUD while preserving the working UI. **Mitigation:** prioritize manual entry and user-owned busy intervals while reusing the existing React/TypeScript/CSS app and calendar. **First cuts:** further Luma/Apple integration work, advanced classification beyond the existing multi-label model, and extra animations. **Never cut:** authentication/data isolation, CRUD, stars, filters/sort, dashboard, two tests, real data, or PR evidence.
+## 4. Two automated acceptance tests (Given / When / Then)
+
+**A — Data isolation.** **Given** User A owns an event and User B is logged in, **when** B requests A's event detail by ID or lists personal events, **then** A's event is inaccessible and absent. This must test the server/data-access layer, not just UI visibility.
+
+**B — Dashboard correctness.** **Given** one user owns five saved events, of which two are starred, **when** the dashboard summary is computed, **then** saved count is five and starred count is two (without double-counting multi-topic joins).
+
+For each: save a plain-English explanation, an actual failing **red** run after temporarily introducing a controlled bug, a passing **green** run after fixing it, screenshots linked in the PR, and a sentence describing what regression the test would catch.
+
+## 5. Technologies and development process
+
+- **AI coding agent:** Replit Agent, to implement small features iteratively while I inspect and approve changes.
+- **Frontend:** retain the existing React + TypeScript app and plain CSS. Reuse the current Discover/List and custom Calendar components, which already support Day, Week, and Month views with solid commitments and dashed possible events; do not migrate to Tailwind or replace the calendar with FullCalendar.
+- **Backend/database/auth:** retain the existing Express + TypeScript server. Proposed persistence: Replit PostgreSQL through `DATABASE_URL`, accessed by the Node `pg` driver; neither the SQL schema nor driver is currently wired into the repository. Proposed end-user authentication: Replit-managed Clerk for signup, login, and session identity, with Express API routes verifying the session and enforcing ownership. Clerk is not configured in this workspace. The existing `SESSION_SECRET` is only used for Luma OAuth session cookies, not app login. These are proposed technologies, not claims about installed infrastructure.
+- **Event integration:** existing Luma MCP adapter and mock provider. OAuth and tool discovery have been verified, but authenticated real `tools/call` event retrieval is **not yet confirmed**; do not label fixture events as live.
+- **Calendar input:** current calendar-import prototype; Apple Calendar Shortcut busy-only sync is a later integration, with minimal private data collection.
+- **Hosting:** existing Replit deployment for the live demo. **Version control:** existing private GitHub repository; every new change follows Issue → branch → saved prompt (`prompts/<feature>.md`) → PR with `Closes #N` → review/merge → deploy. Never commit directly to `main`. First safely reconcile the divergent local checkout and GitHub history without overwriting work.
+
+## 6. Design and experience
+
+Keep the original **Discover List ↔ Calendar Overlay** navigation and shared multi-select Topic/Format/Availability filters. List cards show title, time, location, labels, availability, details, Save, and source link. Add a modest **My Events** area for user-owned CRUD and Starred items, plus a simple dashboard; do not turn the app into a generic task manager. Calendar uses solid personal commitments and dashed possible events, with readable overlaps and a legend. Keep conflicts visible, Unknown explicit, and `.ics` export opt-in. Maintain a clean, responsive interface and avoid AI priority scores, forced rankings, or silent calendar writes.
+
+## 7. Risks, trade-offs, and cuts
+
+**Risk:** live Luma MCP calls or Apple Calendar automation may not be reliable by the deadline. **Response:** preserve the adapter and prototype work but allow manual entry of at least five real events; use clearly labeled demo fallback only for development. **Risk:** existing saved items and busy windows live in browser storage or memory, not durable per-user storage. **Response:** prioritize authentication, SQL persistence, ownership checks, and migration behavior before polishing UI. **Risk:** multi-label events can inflate dashboard counts. **Response:** use distinct event IDs and test summaries. **Risk:** local Git history diverges from GitHub. **Response:** reconcile safely before feature work; do not force-push or erase the draft Luma PR.
+
+**Cut first if needed:** live Luma retrieval, automated Apple Calendar Shortcut, travel-time conflicts, AI ranking, extra visual polish. **Do not cut:** accounts and isolation, related database tables, CRUD, validation, stars, search/filter plus sort, dashboard chart/stats, two required tests and red/green evidence, five real records, PR workflow, or reflection evidence.
 
 ## 8. Plan vs. Reality — complete at the end
-**Do not rewrite the sections above to match the shipped app.** Fill this table using the actual GitHub PRs and implementation evidence.
 
-| Planned feature | Shipped / Changed / Cut | Status (Done / Backlogged) | Learning — what changed and why |
+Preserve sections 1–7 as the formal plan; fill this table with actual implementation status and supporting PRs, including the gap between the October Word plan, prototype work, and this later course-format plan.
+
+| Planned feature | Shipped / Changed / Cut | Done / Backlogged | What changed and why; evidence |
 |---|---|---|---|
-| Accounts | TBD | TBD | TBD |
-| Event database and CRUD | TBD | TBD | TBD |
-| Validation and stars | TBD | TBD | TBD |
-| Search, filters, sorting | TBD | TBD | TBD |
+| Accounts, database, isolation | TBD | TBD | TBD |
+| Event CRUD and validation | TBD | TBD | TBD |
+| Stars and Starred view | TBD | TBD | TBD |
+| Search, multi-label filters, sort | TBD | TBD | TBD |
 | Dashboard | TBD | TBD | TBD |
-| Calendar view | TBD | TBD | TBD |
-| Conflict detection | TBD | TBD | TBD |
-| ICS export | TBD | TBD | TBD |
-| Luma / calendar integrations (deferred) | TBD | TBD | TBD |
+| Calendar overlay, conflict detection, ICS | TBD | TBD | TBD |
+| Luma and Apple Calendar integrations | TBD | TBD | TBD |
