@@ -1,10 +1,11 @@
-import type { BusyInterval, EventItem, Preferences } from "../types";
+import type { AttendanceStatus, BusyInterval, EventItem, Preferences } from "../types";
 import type { LegacyRawValues } from "./legacy-storage";
 
 export type AccountData = {
   preferences: Preferences | null;
   savedEventIds: string[];
   savedEvents: EventItem[];
+  attendanceByEventId: Record<string, AttendanceStatus>;
   busyIntervals: BusyInterval[];
 };
 
@@ -33,6 +34,11 @@ export const accountApi = {
     request("/saved-events", {
       method: "PUT",
       body: JSON.stringify({ event, saved }),
+    }),
+  updateAttendanceStatus: (eventId: string, status: AttendanceStatus) =>
+    request("/saved-events/attendance", {
+      method: "PUT",
+      body: JSON.stringify({ eventId, status }),
     }),
   savePreferences: (preferences: Preferences) =>
     request("/preferences", {

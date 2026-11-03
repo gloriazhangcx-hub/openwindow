@@ -73,6 +73,7 @@ h1,h2,h3,p { margin-top:0; }
 .toolbar-right { display:flex;align-items:center;gap:10px; }
 .saved-toggle { display:flex;align-items:center;gap:6px;background:none;border:0;color:#718078;font-size:12px;font-weight:600;cursor:pointer;padding:8px;border-radius:8px; }
 .saved-toggle:hover,.saved-toggle.active { color:#b96353;background:#f7eae4; }
+.my-events-return { white-space:nowrap; }
 .count-label { font-size:11px;color:#939c94;white-space:nowrap; }
 .events-list { padding:4px 20px 22px; }
 .date-group { padding-top:18px; }
@@ -87,6 +88,13 @@ h1,h2,h3,p { margin-top:0; }
 .event-tags { display:flex;gap:5px;flex-wrap:wrap;margin-top:6px; }
 .mini-tag { border-radius:4px;background:#faf1cf;padding:4px 6px;color:#756126;font-size:9px; }
 .mini-tag.topic { background:#eee9f6;color:#594580; }
+.attendance-control { display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;color:#766f84;font-size:10px; }
+.attendance-control label { display:flex;align-items:center;gap:7px;font-weight:700; }
+.attendance-control select { max-width:100%;border:1px solid #e0d8ed;border-radius:7px;padding:6px 9px;background:#fbf9fd;color:#514080;font:600 10px "DM Sans",sans-serif; }
+.attendance-control select:disabled { opacity:.72;cursor:not-allowed; }
+.attendance-sign-in { color:#5b4699;font-size:10px;font-weight:700;text-decoration:none; }
+.attendance-sign-in:hover { text-decoration:underline; }
+.attendance-status-note { color:#929c94;font-size:10px; }
 .event-actions { display:flex;align-items:center;gap:8px; }
 .availability { font-size:10px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:#578069; }
 .availability:before { content:"";width:6px;height:6px;border-radius:50%;background:currentColor; }
@@ -231,6 +239,8 @@ h1,h2,h3,p { margin-top:0; }
  .event-time small {font-size:9px}
  .event-title {font-size:12px}
  .event-sub {font-size:10px}
+  .attendance-control {font-size:9px}
+  .attendance-control select {font-size:9px;padding:5px 7px}
  .event-actions {grid-column:2/4;justify-content:flex-end;flex-wrap:wrap}
  .availability {font-size:9px}
  .details-btn {font-size:9px;padding:6px 8px}

@@ -55,9 +55,11 @@ test("PostgreSQL account storage is isolated and local migration is idempotent",
     const alice = await store.readAccount(aliceId);
     const bob = await store.readAccount(bobId);
     assert.deepEqual(alice.savedEventIds, [event.id]);
+    assert.equal(alice.attendanceByEventId[event.id], "interested");
     assert.deepEqual(alice.preferences?.cities, ["Berkeley"]);
     assert.equal(alice.busyIntervals.length, 1);
     assert.deepEqual(bob.savedEventIds, []);
+    assert.deepEqual(bob.attendanceByEventId, {});
     assert.equal(bob.preferences, null);
     assert.deepEqual(bob.busyIntervals, []);
 
@@ -66,6 +68,14 @@ test("PostgreSQL account storage is isolated and local migration is idempotent",
     const bobAfterWrite = await store.readAccount(bobId);
     assert.deepEqual(aliceAfterBobWrite.savedEventIds, [event.id]);
     assert.deepEqual(bobAfterWrite.savedEventIds, [demoEvents[1].id]);
+    assert.equal(bobAfterWrite.attendanceByEventId[demoEvents[1].id], "interested");
+
+    assert.equal(await store.updateAttendanceStatus(aliceId, event.id, "planning_to_attend"), true);
+    assert.equal(await store.updateAttendanceStatus(bobId, event.id, "registered"), false);
+    const aliceAfterStatus = await store.readAccount(aliceId);
+    const bobAfterCrossAccountStatusAttempt = await store.readAccount(bobId);
+    assert.equal(aliceAfterStatus.attendanceByEventId[event.id], "planning_to_attend");
+    assert.equal(bobAfterCrossAccountStatusAttempt.attendanceByEventId[demoEvents[1].id], "interested");
 
     const aliceUser = await db.select({ id: users.id }).from(users).where(eq(users.clerkUserId, aliceId)).limit(1);
     const bobUser = await db.select({ id: users.id }).from(users).where(eq(users.clerkUserId, bobId)).limit(1);

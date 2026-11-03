@@ -3,8 +3,8 @@ import { once } from "node:events";
 import { createServer } from "node:http";
 import express from "express";
 import { test } from "node:test";
-import { DEFAULT_PREFERENCES } from "../src/data/events";
-import type { BusyInterval, EventItem, Preferences } from "../src/types";
+import { DEFAULT_PREFERENCES, demoEvents } from "../src/data/events";
+import type { AttendanceStatus, BusyInterval, EventItem, Preferences } from "../src/types";
 import type { AccountData, AccountStore, LegacyRawValues, MigrationResult } from "./account-store";
 import { createAccountRouter } from "./account-routes";
 
@@ -14,7 +14,13 @@ class MemoryStore implements AccountStore {
   private row(userId: string): AccountData {
     const existing = this.rows.get(userId);
     if (existing) return existing;
-    const created: AccountData = { preferences: null, savedEventIds: [], savedEvents: [], busyIntervals: [] };
+    const created: AccountData = {
+      preferences: null,
+      savedEventIds: [],
+      savedEvents: [],
+      attendanceByEventId: {},
+      busyIntervals: [],
+    };
     this.rows.set(userId, created);
     return created;
   }
@@ -33,6 +39,7 @@ class MemoryStore implements AccountStore {
       if (!row.savedEventIds.includes(event.id)) {
         row.savedEventIds.push(event.id);
         row.savedEvents.push(event);
+        row.attendanceByEventId[event.id] = "interested";
       }
     }
     return { savedEvents: row.savedEvents.length, busyIntervals: 0, preferencesImported: false, snapshotStored: true };
@@ -43,11 +50,20 @@ class MemoryStore implements AccountStore {
     if (saved && !row.savedEventIds.includes(event.id)) {
       row.savedEventIds.push(event.id);
       row.savedEvents.push(event);
+      row.attendanceByEventId[event.id] = "interested";
     }
     if (!saved) {
       row.savedEventIds = row.savedEventIds.filter((id) => id !== event.id);
       row.savedEvents = row.savedEvents.filter((item) => item.id !== event.id);
+      delete row.attendanceByEventId[event.id];
     }
+  }
+
+  async updateAttendanceStatus(userId: string, eventId: string, status: AttendanceStatus) {
+    const row = this.row(userId);
+    if (!row.savedEventIds.includes(eventId)) return false;
+    row.attendanceByEventId[eventId] = status;
+    return true;
   }
 
   async savePreferences(userId: string, preferences: Preferences) {
@@ -114,6 +130,69 @@ test("request-supplied user IDs cannot redirect private writes to another accoun
     const aliceData = await alice.json() as AccountData;
     assert.deepEqual(bobData.preferences?.cities, ["Oakland"]);
     assert.equal(aliceData.preferences, null);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
+test("attendance updates validate status and stay private to the saved-event owner", async () => {
+  const store = new MemoryStore();
+  const event = demoEvents[0];
+  await store.setSavedEvent("alice", event, true);
+
+  const app = express();
+  app.use("/api/account", createAccountRouter(
+    store,
+    (request) => request.header("x-test-session") ?? null,
+  ));
+  const server = createServer(app);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}/api/account`;
+  const update = (user: string, status: unknown) => fetch(`${base}/saved-events/attendance`, {
+    method: "PUT",
+    headers: { "content-type": "application/json", "x-test-session": user },
+    body: JSON.stringify({ eventId: event.id, status }),
+  });
+
+  try {
+    for (const status of ["interested", "planning_to_attend", "registered"]) {
+      const response = await update("alice", status);
+      assert.equal(response.status, 200);
+    }
+
+    const invalidWrite = await update("alice", "attending");
+    assert.equal(invalidWrite.status, 400);
+
+    const spoofedWrite = await fetch(`${base}/saved-events/attendance`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-test-session": "alice" },
+      body: JSON.stringify({ eventId: event.id, status: "interested", userId: "bob" }),
+    });
+    assert.equal(spoofedWrite.status, 400);
+
+    const unauthenticatedWrite = await fetch(`${base}/saved-events/attendance`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ eventId: event.id, status: "registered" }),
+    });
+    assert.equal(unauthenticatedWrite.status, 401);
+
+    const bobWrite = await update("bob", "registered");
+    assert.equal(bobWrite.status, 404);
+
+    const aliceData = await (await fetch(`${base}/data`, {
+      headers: { "x-test-session": "alice" },
+    })).json() as AccountData;
+    const bobData = await (await fetch(`${base}/data`, {
+      headers: { "x-test-session": "bob" },
+    })).json() as AccountData;
+    assert.equal(aliceData.attendanceByEventId[event.id], "registered");
+    assert.deepEqual(bobData.savedEventIds, []);
+    assert.deepEqual(bobData.attendanceByEventId, {});
   } finally {
     server.close();
     await once(server, "close");

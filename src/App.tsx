@@ -17,11 +17,29 @@ import {
 } from "./lib/calendar-views";
 import { findNearestUpcomingSavedEvent } from "./lib/saved-events";
 import { filterEvents } from "./lib/event-filtering";
-import type { Availability, BusyInterval, EventItem, Format, Preferences, Topic } from "./types";
+import {
+  ATTENDANCE_STATUSES,
+  ATTENDANCE_STATUS_LABELS,
+  type AttendanceStatus,
+  type Availability,
+  type BusyInterval,
+  type EventItem,
+  type Format,
+  type Preferences,
+  type Topic,
+} from "./types";
 import { FORMATS, TOPICS } from "./types";
 
 type View = "list" | "calendar";
 type AvailabilityFilter = "all" | Availability;
+type AttendanceEditorProps = {
+  eventId: string;
+  eventTitle: string;
+  status: AttendanceStatus;
+  isAuthenticated: boolean;
+  accountReady: boolean;
+  onChange: (status: AttendanceStatus) => void;
+};
 
 const fmtDate = (date: Date, options: Intl.DateTimeFormatOptions, zone = "America/Los_Angeles") =>
   new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone }).format(date);
@@ -162,7 +180,7 @@ function App() {
       : model.isAuthenticated ? "Saved to your account" : "Saved on this device · Sign in to sync");
   };
 
-  const toggleSavedOnly = () => {
+  const toggleMyEvents = () => {
     const nextSavedOnly = !savedOnly;
     if (nextSavedOnly && view === "calendar") {
       const nearest = findNearestUpcomingSavedEvent(filteredEvents, model.savedEventIds);
@@ -260,11 +278,25 @@ function App() {
                 <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "selected" : ""} onClick={openCalendar}><CalendarDays size={15} /> Calendar</button>
               </div>
               <div className="toolbar-right">
-                <button className={`saved-toggle ${savedOnly ? "active" : ""}`} aria-pressed={savedOnly} onClick={toggleSavedOnly}><Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> Saved <span>{model.savedEventIds.length}</span></button>
+                <button
+                  className={`saved-toggle ${savedOnly ? "active" : ""}`}
+                  aria-pressed={savedOnly}
+                  aria-label={savedOnly ? "My Events selected" : "Show My Events"}
+                  onClick={toggleMyEvents}
+                >
+                  <Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> My Events <span>{model.savedEventIds.length}</span>
+                </button>
+                {savedOnly && (
+                  <button className="text-button my-events-return" type="button" onClick={() => setSavedOnly(false)}>
+                    <ChevronLeft size={14} /> Full Discover
+                  </button>
+                )}
                 <span className="count-label">
                   {view === "calendar"
                     ? `${calendarEvents.length} ${calendarMode === "week" ? "this week" : calendarMode === "day" ? "in day" : "in month view"} · ${filteredEvents.length} total`
-                    : `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"}`}
+                    : savedOnly
+                      ? `${filteredEvents.length} ${filteredEvents.length === 1 ? "saved event" : "saved events"}`
+                      : `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"}`}
                 </span>
               </div>
             </div>
@@ -273,7 +305,22 @@ function App() {
                 {dateGroups.map(([date, events]) => (
                   <section className="date-group" key={date}>
                     <h2 className="date-heading">{formatLongDate(safeDate(events[0].start))}{events.length > 1 && <span>{events.length} events</span>}</h2>
-                    {events.map((event) => <EventRow key={event.id} event={event} availability={model.availabilityByEvent[event.id] ?? "unknown"} saved={model.savedEventIds.includes(event.id)} onSave={() => saveEvent(event)} onDetails={() => setActiveEvent(event)} />)}
+                    {events.map((event) => <EventRow
+                      key={event.id}
+                      event={event}
+                      availability={model.availabilityByEvent[event.id] ?? "unknown"}
+                      saved={model.savedEventIds.includes(event.id)}
+                      attendance={savedOnly ? {
+                        eventId: event.id,
+                        eventTitle: event.title,
+                        status: model.attendanceByEventId[event.id] ?? "interested",
+                        isAuthenticated: model.isAuthenticated,
+                        accountReady: model.accountReady,
+                        onChange: (status) => model.updateAttendanceStatus(event.id, status),
+                      } : undefined}
+                      onSave={() => saveEvent(event)}
+                      onDetails={() => setActiveEvent(event)}
+                    />)}
                   </section>
                 ))}
                 <div className="footer-note"><span>Local times · Suggestions, not bookings.</span></div>
@@ -297,7 +344,21 @@ function App() {
         </div>
       </main>
 
-      {activeEvent && <EventModal event={activeEvent} availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"} saved={model.savedEventIds.includes(activeEvent.id)} onSave={() => saveEvent(activeEvent)} onClose={() => setActiveEvent(null)} />}
+      {activeEvent && <EventModal
+        event={activeEvent}
+        availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"}
+        saved={model.savedEventIds.includes(activeEvent.id)}
+        attendance={savedOnly && model.savedEventIds.includes(activeEvent.id) ? {
+          eventId: activeEvent.id,
+          eventTitle: activeEvent.title,
+          status: model.attendanceByEventId[activeEvent.id] ?? "interested",
+          isAuthenticated: model.isAuthenticated,
+          accountReady: model.accountReady,
+          onChange: (status) => model.updateAttendanceStatus(activeEvent.id, status),
+        } : undefined}
+        onSave={() => saveEvent(activeEvent)}
+        onClose={() => setActiveEvent(null)}
+      />}
       {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
       {model.isAuthenticated && model.persistenceStatus === "error" && <div className="sync-alert" role="status">
         <span>Account sync needs attention. Your local data is still preserved.</span>
@@ -308,8 +369,9 @@ function App() {
   );
 }
 
-function EventRow({ event, availability, saved, onSave, onDetails }: {
-  event: EventItem; availability: Availability; saved: boolean; onSave: () => void; onDetails: () => void;
+function EventRow({ event, availability, saved, attendance, onSave, onDetails }: {
+  event: EventItem; availability: Availability; saved: boolean; attendance?: AttendanceEditorProps;
+  onSave: () => void; onDetails: () => void;
 }) {
   return (
     <article className="event-row">
@@ -321,6 +383,7 @@ function EventRow({ event, availability, saved, onSave, onDetails }: {
           {event.topics[0] && <span className="mini-tag topic">{event.topics[0]}</span>}
           {event.formats[0] && <span className="mini-tag">{event.formats[0]}</span>}
         </div>
+        {attendance && <AttendanceControl {...attendance} />}
       </div>
       <div className="event-actions">
         <span className={`availability ${availability}`}>{availabilityLabel[availability]}</span>
@@ -332,11 +395,40 @@ function EventRow({ event, availability, saved, onSave, onDetails }: {
   );
 }
 
+function AttendanceControl({
+  eventId,
+  eventTitle,
+  status,
+  isAuthenticated,
+  accountReady,
+  onChange,
+}: AttendanceEditorProps) {
+  return (
+    <div className="attendance-control">
+      <label>
+        <span>Attendance</span>
+        <select
+          aria-label={`Attendance status for ${eventTitle}`}
+          value={status}
+          disabled={!isAuthenticated || !accountReady}
+          onChange={(event) => onChange(event.target.value as AttendanceStatus)}
+        >
+          {ATTENDANCE_STATUSES.map((value) => (
+            <option key={`${eventId}-${value}`} value={value}>{ATTENDANCE_STATUS_LABELS[value]}</option>
+          ))}
+        </select>
+      </label>
+      {!isAuthenticated && <Link className="attendance-sign-in" href="/sign-in">Sign in to edit</Link>}
+      {isAuthenticated && !accountReady && <span className="attendance-status-note" role="status">Loading account…</span>}
+    </div>
+  );
+}
+
 function EmptyState({ savedOnly, onReset, onPreferences }: { savedOnly: boolean; onReset: () => void; onPreferences: () => void }) {
   return <div className="empty-state">
     <div><div className="empty-orbit"><Sparkles size={22} /></div>
-      <h3>{savedOnly ? "Your saved list is still open." : "A little quiet in this window."}</h3>
-      <p>{savedOnly ? "Save an event that catches your eye and it will be waiting here." : "Try a broader topic, or open your preferences to make room for more kinds of events."}</p>
+      <h3>{savedOnly ? "No events in My Events yet." : "A little quiet in this window."}</h3>
+      <p>{savedOnly ? "Use the bookmark on any event to add it here." : "Try a broader topic, or open your preferences to make room for more kinds of events."}</p>
       {!savedOnly && <button className="button secondary" onClick={onPreferences}>Adjust preferences</button>}
       {savedOnly && <button className="button secondary" onClick={onReset}>Show all events</button>}
     </div>
@@ -486,8 +578,9 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, o
   </div>;
 }
 
-function EventModal({ event, availability, saved, onSave, onClose }: {
-  event: EventItem; availability: Availability; saved: boolean; onSave: () => void; onClose: () => void;
+function EventModal({ event, availability, saved, attendance, onSave, onClose }: {
+  event: EventItem; availability: Availability; saved: boolean; attendance?: AttendanceEditorProps;
+  onSave: () => void; onClose: () => void;
 }) {
   return <div className="modal-backdrop" onMouseDown={(eventClick) => { if (eventClick.target === eventClick.currentTarget) onClose(); }}>
     <section className="modal" role="dialog" aria-modal="true" aria-labelledby="event-dialog-title">
@@ -498,6 +591,7 @@ function EventModal({ event, availability, saved, onSave, onClose }: {
           <div className="meta-block"><small>Where</small><strong>{event.venue}<br />{event.city}</strong></div>
         </div>
         <div className="detail-fit"><span>Calendar fit</span><strong className={`availability ${availability}`}>{availabilityLabel[availability]}</strong></div>
+        {attendance && <AttendanceControl {...attendance} />}
         <p className="detail-description">{event.description}</p>
         <div className="detail-tag-list">
           {event.topics[0] && <span className="mini-tag topic">{event.topics[0]}</span>}

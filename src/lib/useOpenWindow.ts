@@ -17,7 +17,7 @@ import {
   getLocalDataOwner,
   preserveLegacyStorage,
 } from "./legacy-storage";
-import type { BusyInterval, CalendarSyncStatus, EventItem, Preferences } from "../types";
+import type { AttendanceStatus, BusyInterval, CalendarSyncStatus, EventItem, Preferences } from "../types";
 
 type BusyOrigin = "Demo sample" | "Imported locally" | "Not synced";
 export type PersistenceStatus = "local" | "syncing" | "synced" | "error";
@@ -117,6 +117,7 @@ export interface OpenWindowModel {
   busyIntervals: BusyInterval[] | null;
   busyOrigin: BusyOrigin;
   savedEventIds: string[];
+  attendanceByEventId: Record<string, AttendanceStatus>;
   preferences: Preferences;
   syncStatus: CalendarSyncStatus;
   persistenceStatus: PersistenceStatus;
@@ -124,6 +125,7 @@ export interface OpenWindowModel {
   isAuthenticated: boolean;
   availabilityByEvent: Record<string, ReturnType<typeof getAvailability>>;
   saveEvent: (event: EventItem) => void;
+  updateAttendanceStatus: (eventId: string, status: AttendanceStatus) => void;
   updatePreferences: (preferences: Preferences) => void;
   importBusyIntervals: (payload: unknown) => number;
   clearImportedBusyIntervals: () => void;
@@ -155,6 +157,7 @@ export function useOpenWindow(): OpenWindowModel {
   const [savedEventIds, setSavedEventIds] = useState<string[]>(() =>
     initialLocalAllowed ? readStored<string[]>(STORAGE_KEYS.saved, []) : [],
   );
+  const [attendanceByEventId, setAttendanceByEventId] = useState<Record<string, AttendanceStatus>>({});
   const [preferences, setPreferences] = useState<Preferences>(
     initialLocalAllowed ? readPreferences() : DEFAULT_PREFERENCES,
   );
@@ -175,6 +178,7 @@ export function useOpenWindow(): OpenWindowModel {
       attemptedUserRef.current = null;
       setLoadedUserId(null);
       setSavedEventSnapshots([]);
+      setAttendanceByEventId({});
       setPersistenceStatus("local");
       if (!canHydrateLocalData(
         true,
@@ -228,6 +232,7 @@ export function useOpenWindow(): OpenWindowModel {
       if (cancelled) return;
       setSavedEventIds(account.savedEventIds);
       setSavedEventSnapshots(account.savedEvents);
+      setAttendanceByEventId(account.attendanceByEventId);
       setPreferences(account.preferences ?? (canUseThisUserLocalState ? readPreferences() : DEFAULT_PREFERENCES));
       setBusyIntervals(account.busyIntervals.length ? account.busyIntervals : demoBusyIntervals);
       setBusyOrigin(account.busyIntervals.length ? "Imported locally" : "Demo sample");
@@ -254,6 +259,7 @@ export function useOpenWindow(): OpenWindowModel {
     getLegacyMigrationOwner(window.localStorage),
   );
   const visibleSavedIds = accountReady ? savedEventIds : [];
+  const visibleAttendanceByEventId = accountReady ? attendanceByEventId : {};
   const visiblePreferences = accountReady ? preferences : DEFAULT_PREFERENCES;
   const visibleBusyIntervals = accountReady ? busyIntervals : demoBusyIntervals;
   const visibleSavedSnapshots = accountReady ? savedEventSnapshots : [];
@@ -287,9 +293,24 @@ export function useOpenWindow(): OpenWindowModel {
     setSavedEventSnapshots((previous) => nextSaved
       ? [...previous.filter((item) => item.id !== event.id), event]
       : previous.filter((item) => item.id !== event.id));
+    setAttendanceByEventId((previous) => {
+      if (nextSaved) {
+        return previous[event.id]
+          ? previous
+          : { ...previous, [event.id]: "interested" };
+      }
+      const { [event.id]: _removed, ...remaining } = previous;
+      return remaining;
+    });
     writeLegacyValue(STORAGE_KEYS.saved, JSON.stringify(nextIds), isSignedIn, userId ?? null);
     if (isSignedIn) syncWrite(() => accountApi.setSavedEvent(event, nextSaved));
   }, [visibleSavedIds, isSignedIn, userId, syncWrite]);
+
+  const updateAttendanceStatus = useCallback((eventId: string, status: AttendanceStatus) => {
+    if (!isSignedIn || !accountReady || !visibleSavedIds.includes(eventId)) return;
+    setAttendanceByEventId((previous) => ({ ...previous, [eventId]: status }));
+    syncWrite(() => accountApi.updateAttendanceStatus(eventId, status));
+  }, [isSignedIn, accountReady, visibleSavedIds, syncWrite]);
 
   const updatePreferences = useCallback((nextPreferences: Preferences) => {
     const safePreferences = {
@@ -351,6 +372,7 @@ export function useOpenWindow(): OpenWindowModel {
     busyIntervals: visibleBusyIntervals,
     busyOrigin: accountReady ? busyOrigin : "Demo sample",
     savedEventIds: visibleSavedIds,
+    attendanceByEventId: visibleAttendanceByEventId,
     preferences: visiblePreferences,
     syncStatus,
     persistenceStatus,
@@ -358,6 +380,7 @@ export function useOpenWindow(): OpenWindowModel {
     isAuthenticated: Boolean(isSignedIn),
     availabilityByEvent,
     saveEvent,
+    updateAttendanceStatus,
     updatePreferences,
     importBusyIntervals,
     clearImportedBusyIntervals,

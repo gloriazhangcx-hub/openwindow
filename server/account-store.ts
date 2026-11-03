@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import type { BusyInterval, EventItem, Preferences } from "../src/types";
+import type { AttendanceStatus, BusyInterval, EventItem, Preferences } from "../src/types";
 import {
   busyIntervals,
   eventFormats,
@@ -28,6 +28,7 @@ export type AccountData = {
   preferences: Preferences | null;
   savedEventIds: string[];
   savedEvents: EventItem[];
+  attendanceByEventId: Record<string, AttendanceStatus>;
   busyIntervals: BusyInterval[];
 };
 
@@ -46,6 +47,11 @@ export interface AccountStore {
     eventSnapshots: EventItem[],
   ): Promise<MigrationResult>;
   setSavedEvent(clerkUserId: string, event: EventItem, saved: boolean): Promise<void>;
+  updateAttendanceStatus(
+    clerkUserId: string,
+    eventId: string,
+    status: AttendanceStatus,
+  ): Promise<boolean>;
   savePreferences(clerkUserId: string, preferences: Preferences): Promise<void>;
   replaceBusyIntervals(clerkUserId: string, intervals: BusyInterval[]): Promise<void>;
   clearBusyIntervals(clerkUserId: string): Promise<void>;
@@ -141,6 +147,7 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         .select({
           id: events.id,
           legacyEventId: events.legacyEventId,
+          attendanceStatus: savedEvents.attendanceStatus,
           title: events.title,
           description: events.description,
           startsAt: events.startsAt,
@@ -200,6 +207,11 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         preferences: preferenceRow?.preferences ?? null,
         savedEventIds: savedEventItems.map((event) => event.id),
         savedEvents: savedEventItems,
+        attendanceByEventId: Object.fromEntries(
+          savedRows.flatMap((row) => row.legacyEventId
+            ? [[row.legacyEventId, row.attendanceStatus] as const]
+            : []),
+        ),
         busyIntervals: storedIntervals,
       };
     },
@@ -274,6 +286,37 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
           }
         }
       });
+    },
+
+    async updateAttendanceStatus(clerkUserId, eventId, status) {
+      const database = resolveDatabase();
+      const userId = await ensureUser(database, clerkUserId);
+      const [matchingSavedEvent] = await database
+        .select({ id: events.id })
+        .from(savedEvents)
+        .innerJoin(
+          events,
+          and(
+            eq(savedEvents.eventId, events.id),
+            eq(events.userId, userId),
+          ),
+        )
+        .where(and(
+          eq(savedEvents.userId, userId),
+          eq(events.legacyEventId, eventId),
+        ))
+        .limit(1);
+      if (!matchingSavedEvent) return false;
+
+      const [updated] = await database
+        .update(savedEvents)
+        .set({ attendanceStatus: status })
+        .where(and(
+          eq(savedEvents.userId, userId),
+          eq(savedEvents.eventId, matchingSavedEvent.id),
+        ))
+        .returning({ eventId: savedEvents.eventId });
+      return Boolean(updated);
     },
 
     async savePreferences(clerkUserId, preferences) {
