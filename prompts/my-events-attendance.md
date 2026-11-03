@@ -3,7 +3,8 @@
 - Issue: https://github.com/gloriazhangcx-hub/openwindow/issues/13
 - Branch: `feature/13-my-events-attendance`
 - Base: GitHub `main` at `b0c82e15df8ac69db37f9807e84e686bf33522a4`
-- Status: implementation and local verification complete; PR pending.
+- Status: implementation and local verification complete; PR #14 is open for review.
+- Pull request: https://github.com/gloriazhangcx-hub/openwindow/pull/14
 
 ## Approved user request
 
