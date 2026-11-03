@@ -73,6 +73,19 @@ export const stars = pgTable(
   ],
 );
 
+export const savedEvents = pgTable(
+  "saved_events",
+  {
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    eventId: uuid("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.userId, table.eventId] }),
+    index("saved_events_user_id_idx").on(table.userId),
+  ],
+);
+
 export const busyIntervals = pgTable(
   "busy_intervals",
   {
@@ -101,4 +114,9 @@ export const migrationSnapshots = pgTable("migration_snapshots", {
   userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   rawPayload: jsonb("raw_payload").$type<Record<string, string | null>>().notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const schemaMigrations = pgTable("openwindow_schema_migrations", {
+  id: varchar("id", { length: 120 }).primaryKey(),
+  appliedAt: timestamp("applied_at", { withTimezone: true }).defaultNow().notNull(),
 });

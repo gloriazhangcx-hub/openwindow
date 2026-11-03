@@ -10,7 +10,8 @@
     "test": "tsx --test src/lib/*.test.ts src/data/*.test.ts server/*.test.ts",
     "typecheck": "tsc --noEmit",
     "db:push": "drizzle-kit push",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx server/db/migrate-saved-events.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.86",

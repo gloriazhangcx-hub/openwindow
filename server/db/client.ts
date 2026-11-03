@@ -19,6 +19,12 @@ export function getDatabase(): Database {
   return database;
 }
 
+export function getPool(): Pool {
+  if (!pool) getDatabase();
+  if (!pool) throw new Error("PostgreSQL pool could not be initialized.");
+  return pool;
+}
+
 export async function closeDatabase() {
   if (pool) await pool.end();
   pool = null;

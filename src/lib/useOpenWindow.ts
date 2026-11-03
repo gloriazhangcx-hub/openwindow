@@ -4,6 +4,12 @@ import { DEFAULT_PREFERENCES, demoBusyIntervals, mockEventSource } from "../data
 import { getAvailability } from "./calendar";
 import { accountApi } from "./account-api";
 import {
+  canExposeAccountData,
+  canHydrateLocalData,
+  canImportLegacyForUser,
+  enqueueAccountWrite,
+} from "./account-session";
+import {
   LEGACY_MIGRATED_FOR_KEY,
   LOCAL_DATA_OWNER_KEY,
   STORAGE_KEYS,
@@ -68,15 +74,6 @@ function readPreferences(): Preferences {
   };
 }
 
-function canHydrateLocalData(isLoaded: boolean, isSignedIn: boolean | undefined, userId: string | null): boolean {
-  const storage = window.localStorage;
-  const localOwner = getLocalDataOwner(storage);
-  const migrationOwner = getLegacyMigrationOwner(storage);
-  if (localOwner) return isLoaded && isSignedIn === true && localOwner === userId;
-  if (migrationOwner) return isLoaded && isSignedIn === true && migrationOwner === userId;
-  return true;
-}
-
 function readBusyState(): { intervals: BusyInterval[] | null; origin: BusyOrigin; lastSyncedAt: string | null } {
   const stored = localStorage.getItem(STORAGE_KEYS.busy);
   if (stored !== null) {
@@ -135,7 +132,15 @@ export interface OpenWindowModel {
 
 export function useOpenWindow(): OpenWindowModel {
   const { isLoaded: authLoaded, isSignedIn, userId } = useAuth();
-  const initialLocalAllowed = canHydrateLocalData(authLoaded, isSignedIn, userId ?? null);
+  const activeUserRef = useRef<string | null>(null);
+  activeUserRef.current = authLoaded && isSignedIn && userId ? userId : null;
+  const initialLocalAllowed = canHydrateLocalData(
+    authLoaded,
+    isSignedIn,
+    userId ?? null,
+    getLocalDataOwner(window.localStorage),
+    getLegacyMigrationOwner(window.localStorage),
+  );
   const [events, setEvents] = useState<EventItem[]>([]);
   const initialBusy = useRef(readBusyState()).current;
   const [busyIntervals, setBusyIntervals] = useState<BusyInterval[] | null>(
@@ -171,7 +176,13 @@ export function useOpenWindow(): OpenWindowModel {
       setLoadedUserId(null);
       setSavedEventSnapshots([]);
       setPersistenceStatus("local");
-      if (!canHydrateLocalData(true, false, null)) {
+      if (!canHydrateLocalData(
+        true,
+        false,
+        null,
+        getLocalDataOwner(window.localStorage),
+        getLegacyMigrationOwner(window.localStorage),
+      )) {
         setSavedEventIds([]);
         setPreferences(DEFAULT_PREFERENCES);
         setBusyIntervals(demoBusyIntervals);
@@ -194,9 +205,7 @@ export function useOpenWindow(): OpenWindowModel {
     let cancelled = false;
     const localOwner = getLocalDataOwner(window.localStorage);
     const migrationOwner = getLegacyMigrationOwner(window.localStorage);
-    const mayImportLegacy =
-      (!migrationOwner || migrationOwner === userId) &&
-      (!localOwner || localOwner === userId);
+    const mayImportLegacy = canImportLegacyForUser(userId, localOwner, migrationOwner);
     const canUseThisUserLocalState = !localOwner || localOwner === userId;
 
     void (async () => {
@@ -236,11 +245,14 @@ export function useOpenWindow(): OpenWindowModel {
     };
   }, [authLoaded, isSignedIn, userId, events, retryCount]);
 
-  const accountReady = authLoaded
-    ? isSignedIn
-      ? loadedUserId === userId
-      : !getLocalDataOwner(window.localStorage) && !getLegacyMigrationOwner(window.localStorage)
-    : !getLocalDataOwner(window.localStorage) && !getLegacyMigrationOwner(window.localStorage);
+  const accountReady = canExposeAccountData(
+    authLoaded,
+    isSignedIn,
+    userId ?? null,
+    loadedUserId,
+    getLocalDataOwner(window.localStorage),
+    getLegacyMigrationOwner(window.localStorage),
+  );
   const visibleSavedIds = accountReady ? savedEventIds : [];
   const visiblePreferences = accountReady ? preferences : DEFAULT_PREFERENCES;
   const visibleBusyIntervals = accountReady ? busyIntervals : demoBusyIntervals;
@@ -254,11 +266,15 @@ export function useOpenWindow(): OpenWindowModel {
   }, [events, visibleSavedSnapshots]);
 
   const syncWrite = useCallback((operation: () => Promise<unknown>) => {
-    setPersistenceStatus("syncing");
-    writeQueue.current = writeQueue.current
-      .then(() => operation())
-      .then(() => setPersistenceStatus("synced"))
-      .catch(() => setPersistenceStatus("error"));
+    const expectedUserId = activeUserRef.current;
+    if (!expectedUserId) return;
+    writeQueue.current = enqueueAccountWrite(
+      writeQueue.current,
+      activeUserRef,
+      expectedUserId,
+      operation,
+      setPersistenceStatus,
+    );
   }, []);
 
   const saveEvent = useCallback((event: EventItem) => {

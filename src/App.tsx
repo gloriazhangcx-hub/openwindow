@@ -16,13 +16,13 @@ import {
   type CalendarMode,
 } from "./lib/calendar-views";
 import { findNearestUpcomingSavedEvent } from "./lib/saved-events";
+import { filterEvents } from "./lib/event-filtering";
 import type { Availability, BusyInterval, EventItem, Format, Preferences, Topic } from "./types";
 import { FORMATS, TOPICS } from "./types";
 
 type View = "list" | "calendar";
 type AvailabilityFilter = "all" | Availability;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const fmtDate = (date: Date, options: Intl.DateTimeFormatOptions, zone = "America/Los_Angeles") =>
   new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone }).format(date);
 const dayKey = (date: Date, zone = "America/Los_Angeles") =>
@@ -112,20 +112,15 @@ function App() {
   const toggleIn = <T,>(list: T[], item: T, setter: (next: T[]) => void) =>
     setter(list.includes(item) ? list.filter((value) => value !== item) : [...list, item]);
 
-  const filteredEvents = useMemo(() => {
-    const now = Date.now();
-    return model.events.filter((event) => {
-      const start = Date.parse(event.start);
-      if (!Number.isFinite(start) || start < now - 60 * 60 * 1000 || start > now + model.preferences.dateHorizonDays * DAY_MS) return false;
-      const cityMatch = model.preferences.cities.length === 0 || model.preferences.cities.some((city) => event.city.toLowerCase().includes(city.toLowerCase()));
-      if (!cityMatch) return false;
-      if (selectedTopics.length && !selectedTopics.some((topic) => event.topics.includes(topic))) return false;
-      if (selectedFormats.length && !selectedFormats.some((format) => event.formats.includes(format))) return false;
-      if (availabilityFilter !== "all" && model.availabilityByEvent[event.id] !== availabilityFilter) return false;
-      if (savedOnly && !model.savedEventIds.includes(event.id)) return false;
-      return true;
-    }).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
-  }, [model.events, model.preferences, model.availabilityByEvent, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, savedOnly]);
+  const filteredEvents = useMemo(() => filterEvents(model.events, {
+    preferences: model.preferences,
+    availabilityByEvent: model.availabilityByEvent,
+    savedEventIds: model.savedEventIds,
+    selectedTopics,
+    selectedFormats,
+    availabilityFilter,
+    savedOnly,
+  }), [model.events, model.preferences, model.availabilityByEvent, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, savedOnly]);
 
   const dateGroups = useMemo(() => {
     const groups = new Map<string, EventItem[]>();
