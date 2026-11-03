@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bookmark, CalendarDays, Check, ChevronLeft, ChevronRight, ExternalLink, Heart,
-  LayoutList, MapPin, Settings2, Sparkles, X, Download, Upload,
+  Bookmark, CalendarDays, Check, ChevronLeft, ChevronRight, ExternalLink, Heart, Plus,
+  LayoutList, MapPin, Settings2, Sparkles, X, Download, Upload, Pencil, Trash2,
   RotateCcw, SlidersHorizontal,
 } from "lucide-react";
 import { useClerk, useUser } from "@clerk/react";
@@ -24,6 +24,7 @@ import {
   getCalendarEventAccessibleLabel,
 } from "./lib/calendar-blocks";
 import { CalendarAttendanceMarker } from "./components/CalendarAttendanceMarker";
+import { ManualEventDialog } from "./components/ManualEventDialog";
 import {
   ATTENDANCE_STATUSES,
   ATTENDANCE_STATUS_LABELS,
@@ -33,6 +34,7 @@ import {
   type BusyInterval,
   type EventItem,
   type Format,
+  type ManualEventInput,
   type Preferences,
   type Topic,
 } from "./types";
@@ -57,6 +59,10 @@ const availabilityLabel: Record<Availability, string> = {
   available: "Available", conflict: "Conflict", unknown: "Unknown",
 };
 const safeDate = (date: string) => new Date(date);
+const eventLocation = (event: EventItem) =>
+  event.source === "Manual"
+    ? event.location || event.venue || "Location not specified"
+    : [event.venue, event.city].filter(Boolean).join(" · ");
 
 function eventClock(event: EventItem, end = false) {
   const value = fmtDate(safeDate(end ? event.end : event.start), { hour: "numeric", minute: "2-digit", timeZoneName: "short" }, event.timeZone);
@@ -77,8 +83,8 @@ function downloadIcs(event: EventItem) {
     "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//OpenWindow//Event//EN", "CALSCALE:GREGORIAN",
     "BEGIN:VEVENT", `UID:${event.id}@openwindow.local`, `DTSTAMP:${stamp(new Date().toISOString())}`,
     `DTSTART:${stamp(event.start)}`, `DTEND:${stamp(event.end)}`, `SUMMARY:${escapeIcs(event.title)}`,
-    `DESCRIPTION:${escapeIcs(event.description)}`, `LOCATION:${escapeIcs(`${event.venue}, ${event.city}`)}`,
-    `URL:${event.lumaUrl}`, "END:VEVENT", "END:VCALENDAR",
+    `DESCRIPTION:${escapeIcs(event.description)}`, `LOCATION:${escapeIcs(event.location || [event.venue, event.city].filter(Boolean).join(", "))}`,
+    `URL:${event.eventUrl ?? event.lumaUrl}`, "END:VEVENT", "END:VCALENDAR",
   ].join("\r\n");
   const blob = new Blob([body], { type: "text/calendar;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -121,6 +127,7 @@ function App() {
   const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<AttendanceStatusFilter>("all");
   const [savedOnly, setSavedOnly] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
+  const [manualEventEditor, setManualEventEditor] = useState<{ event?: EventItem } | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
@@ -131,6 +138,12 @@ function App() {
     setSelectedFormats(model.preferences.formats);
   }, [model.accountReady, model.preferences.topics, model.preferences.formats]);
 
+  useEffect(() => {
+    if (model.accountReady) return;
+    setActiveEvent(null);
+    setManualEventEditor(null);
+  }, [model.accountReady]);
+
   const showToast = (message: string) => {
     setToast(message);
     window.clearTimeout(toastTimer.current);
@@ -140,7 +153,14 @@ function App() {
   const toggleIn = <T,>(list: T[], item: T, setter: (next: T[]) => void) =>
     setter(list.includes(item) ? list.filter((value) => value !== item) : [...list, item]);
 
-  const filteredEvents = useMemo(() => filterEvents(model.events, {
+  const eventsForView = useMemo(
+    () => view === "calendar" || savedOnly
+      ? model.events
+      : model.events.filter((event) => event.source !== "Manual"),
+    [model.events, savedOnly, view],
+  );
+
+  const filteredEvents = useMemo(() => filterEvents(eventsForView, {
     preferences: model.preferences,
     availabilityByEvent: model.availabilityByEvent,
     attendanceByEventId: model.attendanceByEventId,
@@ -151,7 +171,7 @@ function App() {
     searchQuery,
     attendanceStatusFilter,
     savedOnly,
-  }), [model.events, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, searchQuery, attendanceStatusFilter, savedOnly]);
+  }), [eventsForView, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, searchQuery, attendanceStatusFilter, savedOnly]);
 
   const dateGroups = useMemo(() => {
     const groups = new Map<string, EventItem[]>();
@@ -196,10 +216,34 @@ function App() {
   const toggleMyEvents = () => {
     const nextSavedOnly = !savedOnly;
     if (nextSavedOnly && view === "calendar") {
-      const nearest = findNearestUpcomingSavedEvent(filteredEvents, model.savedEventIds);
+      const nearest = findNearestUpcomingSavedEvent(filteredEvents, [...model.savedEventIds, ...model.manualEventIds]);
       if (nearest) setCalendarDate(atCalendarNoon(safeDate(nearest.start)));
     }
     setSavedOnly(nextSavedOnly);
+  };
+
+  const saveManualEvent = async (input: ManualEventInput) => {
+    if (manualEventEditor?.event) {
+      await model.updateManualEvent(manualEventEditor.event.id, input);
+      showToast("Personal event updated");
+    } else {
+      const event = await model.createManualEvent(input);
+      if (view === "calendar") {
+        setCalendarDate(atCalendarNoon(safeDate(event.start)));
+        setCalendarMode("day");
+      }
+      showToast("Personal event added to My Events");
+    }
+  };
+
+  const deleteManualEvent = async (event: EventItem) => {
+    try {
+      await model.deleteManualEvent(event.id);
+      setActiveEvent(null);
+      showToast("Personal event deleted");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not delete this event.");
+    }
   };
 
   const clearFilters = () => {
@@ -312,7 +356,7 @@ function App() {
                   aria-label={savedOnly ? "My Events selected" : "Show My Events"}
                   onClick={toggleMyEvents}
                 >
-                  <Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> My Events <span>{model.savedEventIds.length}</span>
+                  <Heart size={15} fill={savedOnly ? "currentColor" : "none"} /> My Events <span>{model.savedEventIds.length + model.manualEventIds.length}</span>
                 </button>
                 {savedOnly && (
                   <button className="text-button my-events-return" type="button" onClick={() => setSavedOnly(false)}>
@@ -334,11 +378,16 @@ function App() {
                     </select>
                   </label>
                 )}
+                {savedOnly && (
+                  <button className="button primary add-event-button" type="button" onClick={() => setManualEventEditor({})}>
+                    <Plus size={14} /> Add Event
+                  </button>
+                )}
                 <span className="count-label">
                   {view === "calendar"
                     ? `${calendarEvents.length} ${calendarMode === "week" ? "this week" : calendarMode === "day" ? "in day" : "in month view"} · ${filteredEvents.length} total`
                     : savedOnly
-                      ? `${filteredEvents.length} ${filteredEvents.length === 1 ? "saved event" : "saved events"}`
+                      ? `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"}`
                       : `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"}`}
                 </span>
               </div>
@@ -416,7 +465,7 @@ function App() {
         event={activeEvent}
         availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"}
         saved={model.savedEventIds.includes(activeEvent.id)}
-        attendance={savedOnly && model.savedEventIds.includes(activeEvent.id) ? {
+        attendance={activeEvent.source === "Manual" || (savedOnly && model.savedEventIds.includes(activeEvent.id)) ? {
           eventId: activeEvent.id,
           eventTitle: activeEvent.title,
           status: model.attendanceByEventId[activeEvent.id] ?? "interested",
@@ -425,7 +474,19 @@ function App() {
           onChange: (status) => model.updateAttendanceStatus(activeEvent.id, status),
         } : undefined}
         onSave={() => saveEvent(activeEvent)}
+        onEdit={activeEvent.source === "Manual" ? () => {
+          setManualEventEditor({ event: activeEvent });
+          setActiveEvent(null);
+        } : undefined}
+        onDelete={activeEvent.source === "Manual" ? () => void deleteManualEvent(activeEvent) : undefined}
         onClose={() => setActiveEvent(null)}
+      />}
+      {manualEventEditor && <ManualEventDialog
+        initialEvent={manualEventEditor.event}
+        isAuthenticated={model.isAuthenticated}
+        accountReady={model.accountReady}
+        onClose={() => setManualEventEditor(null)}
+        onSave={saveManualEvent}
       />}
       {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
       {model.isAuthenticated && model.persistenceStatus === "error" && <div className="sync-alert" role="status">
@@ -445,8 +506,8 @@ function EventRow({ event, availability, saved, attendance, onSave, onDetails }:
     <article className="event-row">
       <div className="event-time">{eventClock(event)}<small>to {fmtDate(safeDate(event.end), { hour: "numeric", minute: "2-digit" }, event.timeZone)}</small></div>
       <div className="event-main">
-        <h3 className="event-title">{event.title}</h3>
-        <div className="event-sub"><MapPin size={11} style={{ verticalAlign: "-2px", marginRight: 3 }} />{event.city} · {event.venue}</div>
+        <h3 className="event-title">{event.title}{event.source === "Manual" && <span className="manual-event-tag">Added by you</span>}</h3>
+        <div className="event-sub"><MapPin size={11} style={{ verticalAlign: "-2px", marginRight: 3 }} />{eventLocation(event)}</div>
         <div className="event-tags">
           {event.topics[0] && <span className="mini-tag topic">{event.topics[0]}</span>}
           {event.formats[0] && <span className="mini-tag">{event.formats[0]}</span>}
@@ -455,7 +516,7 @@ function EventRow({ event, availability, saved, attendance, onSave, onDetails }:
       </div>
       <div className="event-actions">
         <span className={`availability ${availability}`}>{availabilityLabel[availability]}</span>
-        <button className={`save-btn ${saved ? "saved" : ""}`} onClick={onSave} aria-label={saved ? `Remove ${event.title} from saved` : `Save ${event.title}`} aria-pressed={saved}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /></button>
+        {event.source !== "Manual" && <button className={`save-btn ${saved ? "saved" : ""}`} onClick={onSave} aria-label={saved ? `Remove ${event.title} from saved` : `Save ${event.title}`} aria-pressed={saved}><Bookmark size={15} fill={saved ? "currentColor" : "none"} /></button>}
         <button className="details-btn" onClick={onDetails}>Details</button>
         {event.source === "Luma" && event.lumaUrl !== "https://lu.ma" && <a className="list-luma-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={11} /></a>}
       </div>
@@ -501,14 +562,14 @@ function EmptyState({ savedOnly, attendanceFiltered, searchActive, onReset, onCl
   onPreferences: () => void;
 }) {
   const title = searchActive
-    ? savedOnly ? "No saved events match these filters." : "No events match these filters."
+    ? savedOnly ? "No events in My Events match these filters." : "No events match these filters."
     : savedOnly
       ? attendanceFiltered ? "No events match this status." : "No events in My Events yet."
       : "A little quiet in this window.";
   const description = searchActive
     ? "Try another keyword or clear your search. Your other filters will stay in place."
     : savedOnly
-      ? attendanceFiltered ? "Choose All or another status to see more of your saved events." : "Use the bookmark on any event to add it here."
+      ? attendanceFiltered ? "Choose All or another status to see more of your events." : "Save an event with its bookmark or add a personal event."
       : "Try a broader topic, or open your preferences to make room for more kinds of events.";
   return <div className="empty-state">
     <div><div className="empty-orbit"><Sparkles size={22} /></div>
@@ -516,7 +577,7 @@ function EmptyState({ savedOnly, attendanceFiltered, searchActive, onReset, onCl
       <p>{description}</p>
       {searchActive && <button className="button secondary" onClick={onClearSearch}>Clear search</button>}
       {!searchActive && !savedOnly && <button className="button secondary" onClick={onPreferences}>Adjust preferences</button>}
-      {!searchActive && savedOnly && <button className="button secondary" onClick={onReset}>{attendanceFiltered ? "Show all saved events" : "Show all events"}</button>}
+      {!searchActive && savedOnly && <button className="button secondary" onClick={onReset}>{attendanceFiltered ? "Show all My Events" : "Show all events"}</button>}
     </div>
   </div>;
 }
@@ -587,7 +648,7 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, s
               </button>
               <div className="month-day-events">
                 {dayEvents.slice(0, 3).map((event) => {
-                  const attendanceStatus = getCalendarAttendanceStatus(event.id, savedEventIds, attendanceByEventId);
+                  const attendanceStatus = getCalendarAttendanceStatus(event.id, savedEventIds, attendanceByEventId, event.source === "Manual");
                   const accessibleLabel = getCalendarEventAccessibleLabel(
                     event,
                     availability[event.id] ?? "unknown",
@@ -669,7 +730,7 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, s
                         <span className="calendar-event-title-text">{block.event.title}</span>
                       </>}
                   </strong>
-                  <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" }, block.zone)}{!busy && ` · ${block.event.city}`}</span>
+                  <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" }, block.zone)}{!busy && eventLocation(block.event) ? ` · ${eventLocation(block.event)}` : ""}</span>
                 </button>;
               })}
             </div>;
@@ -685,17 +746,18 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, s
   </div>;
 }
 
-function EventModal({ event, availability, saved, attendance, onSave, onClose }: {
+function EventModal({ event, availability, saved, attendance, onSave, onEdit, onDelete, onClose }: {
   event: EventItem; availability: Availability; saved: boolean; attendance?: AttendanceEditorProps;
-  onSave: () => void; onClose: () => void;
+  onSave: () => void; onEdit?: () => void; onDelete?: () => void; onClose: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
   return <div className="modal-backdrop" onMouseDown={(eventClick) => { if (eventClick.target === eventClick.currentTarget) onClose(); }}>
     <section className="modal" role="dialog" aria-modal="true" aria-labelledby="event-dialog-title">
-      <div className="modal-header"><div><div className="eyebrow">Event details</div><h2 id="event-dialog-title">{event.title}</h2></div><button className="modal-close" aria-label="Close details" onClick={onClose}><X size={17} /></button></div>
+      <div className="modal-header"><div><div className="eyebrow">{event.source === "Manual" ? "Personal event · Suggested" : "Event details"}</div><h2 id="event-dialog-title">{event.title}</h2></div><button className="modal-close" aria-label="Close details" onClick={onClose}><X size={17} /></button></div>
       <div className="modal-content">
         <div className="detail-meta">
           <div className="meta-block"><small>When</small><strong>{formatLongDate(safeDate(event.start))}<br />{eventClock(event)} – {eventClock(event, true).replace(/ [A-Z]{2,5}$/, "")}</strong></div>
-          <div className="meta-block"><small>Where</small><strong>{event.venue}<br />{event.city}</strong></div>
+          <div className="meta-block"><small>Where</small><strong>{eventLocation(event)}</strong></div>
         </div>
         <div className="detail-fit"><span>Calendar fit</span><strong className={`availability ${availability}`}>{availabilityLabel[availability]}</strong></div>
         {attendance && <AttendanceControl {...attendance} />}
@@ -706,8 +768,22 @@ function EventModal({ event, availability, saved, attendance, onSave, onClose }:
         </div>
         <div className="modal-actions">
           <button className="button primary" onClick={() => downloadIcs(event)}><Download size={14} /> Download .ics</button>
-          <button className="button secondary" onClick={onSave}><Bookmark size={14} fill={saved ? "currentColor" : "none"} /> {saved ? "Saved" : "Save event"}</button>
+          {event.source === "Manual" ? (
+            <>
+              <button className="button secondary" type="button" onClick={onEdit}><Pencil size={14} /> Edit event</button>
+              {!confirmDelete ? (
+                <button className="button danger" type="button" onClick={() => setConfirmDelete(true)}><Trash2 size={14} /> Delete</button>
+              ) : (
+                <div className="delete-confirm" role="group" aria-label="Confirm delete personal event">
+                  <span>Delete this event?</span>
+                  <button className="button danger" type="button" onClick={onDelete}>Delete event</button>
+                  <button className="button secondary" type="button" onClick={() => setConfirmDelete(false)}>Cancel</button>
+                </div>
+              )}
+            </>
+          ) : <button className="button secondary" onClick={onSave}><Bookmark size={14} fill={saved ? "currentColor" : "none"} /> {saved ? "Saved" : "Save event"}</button>}
           {event.source === "Luma" && event.lumaUrl !== "https://lu.ma" && <a className="external-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={13} /></a>}
+          {event.source === "Manual" && event.eventUrl && <a className="external-link" href={event.eventUrl} target="_blank" rel="noreferrer">Open event link <ExternalLink size={13} /></a>}
         </div>
         <p className="filter-note" style={{ marginTop: 12 }}>Download the calendar file to add this event yourself.</p>
       </div>

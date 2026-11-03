@@ -96,6 +96,37 @@ export const savedEvents = pgTable(
   ],
 );
 
+export const manualEvents = pgTable(
+  "manual_events",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 240 }).notNull(),
+    description: text("description").notNull().default(""),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    timeZone: varchar("time_zone", { length: 100 }).notNull(),
+    location: varchar("location", { length: 240 }).notNull().default(""),
+    eventUrl: varchar("event_url", { length: 2_000 }).notNull().default(""),
+    topics: jsonb("topics").$type<Topic[]>().notNull().default([]),
+    formats: jsonb("formats").$type<Format[]>().notNull().default([]),
+    attendanceStatus: varchar("attendance_status", { length: 32 })
+      .$type<AttendanceStatus>()
+      .notNull()
+      .default("interested"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("manual_events_user_start_idx").on(table.userId, table.startsAt),
+    check("manual_events_end_after_start_check", sql`${table.endsAt} > ${table.startsAt}`),
+    check(
+      "manual_events_attendance_status_check",
+      sql`${table.attendanceStatus} in ('interested', 'planning_to_attend', 'registered')`,
+    ),
+  ],
+);
+
 export const busyIntervals = pgTable(
   "busy_intervals",
   {

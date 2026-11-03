@@ -277,3 +277,24 @@ h1,h2,h3,p { margin-top:0; }
  .detail-meta {gap:8px}
   .detail-fit {margin-bottom:12px}
 }
+
+.manual-event-dialog { width:min(100%,620px); }
+.manual-event-form .form-field { margin-bottom:13px; }
+.manual-event-form .form-field textarea { width:100%;min-height:92px;border:1px solid #e4deeb;border-radius:8px;background:#fbf9fd;padding:10px 11px;color:#40316f;font:12px/1.5 "Manrope",sans-serif;resize:vertical; }
+.manual-event-form .form-field input:focus,.manual-event-form .form-field textarea:focus { outline:2px solid #8b75c3;outline-offset:1px; }
+.manual-event-date-grid { display:grid;grid-template-columns:1fr 1fr;gap:12px; }
+.manual-event-fieldset { border:0;padding:0;margin:2px 0 15px;min-width:0; }
+.manual-event-fieldset legend { margin-bottom:8px;color:#514080;font-size:11px;font-weight:700; }
+.optional-label { color:#918a9f;font-size:10px;font-weight:500;margin-left:4px; }
+.form-error { color:#b35e50;font-size:11px;line-height:1.45;margin:6px 0 0; }
+.manual-event-form input[aria-invalid="true"],.manual-event-form textarea[aria-invalid="true"] { border-color:#c77c6d; }
+.manual-event-tag { display:inline-flex;align-items:center;vertical-align:2px;margin-left:7px;border-radius:999px;background:#fff5d9;color:#85691f;padding:3px 7px;font-size:9px;font-weight:700;letter-spacing:.02em; }
+.delete-confirm { display:flex;align-items:center;gap:7px;flex-wrap:wrap;width:100%;padding:10px;border:1px solid #efd4cd;border-radius:10px;background:#fff8f5;color:#81564e;font-size:11px; }
+.add-event-button { white-space:nowrap; }
+@media (max-width:850px) {
+  .toolbar-right { flex-wrap:wrap; }
+}
+@media (max-width:520px) {
+  .manual-event-date-grid { grid-template-columns:1fr;gap:0; }
+  .delete-confirm { align-items:stretch; }
+}

@@ -38,19 +38,20 @@ export function filterEvents(events: EventItem[], options: EventFilterOptions): 
   const now = options.now ?? Date.now();
   return events.filter((event) => {
     const start = Date.parse(event.start);
-    if (
+    const isManual = event.source === "Manual";
+    if (!isManual && (
       !Number.isFinite(start) ||
       start < now - 60 * 60 * 1000 ||
       start > now + options.preferences.dateHorizonDays * DAY_MS
-    ) return false;
-    const cityMatch = options.preferences.cities.length === 0 ||
+    )) return false;
+    const cityMatch = isManual || options.preferences.cities.length === 0 ||
       options.preferences.cities.some((city) => event.city.toLowerCase().includes(city.toLowerCase()));
     if (!cityMatch) return false;
     if (!matchesSearch(event, options.searchQuery ?? "")) return false;
     if (options.selectedTopics.length && !options.selectedTopics.some((topic) => event.topics.includes(topic))) return false;
     if (options.selectedFormats.length && !options.selectedFormats.some((format) => event.formats.includes(format))) return false;
     if (options.availabilityFilter !== "all" && options.availabilityByEvent[event.id] !== options.availabilityFilter) return false;
-    if (options.savedOnly && !options.savedEventIds.includes(event.id)) return false;
+    if (options.savedOnly && !isManual && !options.savedEventIds.includes(event.id)) return false;
     if (
       options.savedOnly &&
       options.attendanceStatusFilter !== "all" &&

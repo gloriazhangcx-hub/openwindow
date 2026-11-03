@@ -1,10 +1,11 @@
-import type { AttendanceStatus, BusyInterval, EventItem, Preferences } from "../types";
+import type { AttendanceStatus, BusyInterval, EventItem, ManualEventInput, Preferences } from "../types";
 import type { LegacyRawValues } from "./legacy-storage";
 
 export type AccountData = {
   preferences: Preferences | null;
   savedEventIds: string[];
   savedEvents: EventItem[];
+  manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
   busyIntervals: BusyInterval[];
 };
@@ -39,6 +40,23 @@ export const accountApi = {
     request("/saved-events/attendance", {
       method: "PUT",
       body: JSON.stringify({ eventId, status }),
+    }),
+  createManualEvent: async (input: ManualEventInput) =>
+    (await request<{ event: EventItem }>("/manual-events", {
+      method: "POST",
+      body: JSON.stringify(input),
+    })).event,
+  updateManualEvent: async (eventId: string, input: ManualEventInput) =>
+    (await request<{ event: EventItem }>(`/manual-events/${encodeURIComponent(eventId)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    })).event,
+  deleteManualEvent: (eventId: string) =>
+    request(`/manual-events/${encodeURIComponent(eventId)}`, { method: "DELETE" }),
+  updateManualEventAttendance: (eventId: string, status: AttendanceStatus) =>
+    request(`/manual-events/${encodeURIComponent(eventId)}/attendance`, {
+      method: "PUT",
+      body: JSON.stringify({ status }),
     }),
   savePreferences: (preferences: Preferences) =>
     request("/preferences", {

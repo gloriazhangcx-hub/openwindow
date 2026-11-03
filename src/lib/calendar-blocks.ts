@@ -41,8 +41,9 @@ export function getCalendarAttendanceStatus(
   eventId: string,
   savedEventIds: string[],
   attendanceByEventId: Record<string, AttendanceStatus>,
+  isManual = false,
 ): AttendanceStatus | null {
-  if (!savedEventIds.includes(eventId)) return null;
+  if (!isManual && !savedEventIds.includes(eventId)) return null;
   return attendanceByEventId[eventId] ?? "interested";
 }
 
@@ -58,6 +59,7 @@ export function getCalendarEventAccessibleLabel(
   };
   return [
     event.title,
+    event.source === "Manual" ? "Added by you" : null,
     availabilityLabel[availability],
     attendanceStatus ? `Attendance status: ${ATTENDANCE_STATUS_LABELS[attendanceStatus]}` : null,
   ].filter(Boolean).join(", ");
@@ -82,7 +84,12 @@ export function getCalendarDayBlocks(
       event,
       zone: event.timeZone,
       availability: availabilityByEventId[event.id] ?? "unknown",
-      attendanceStatus: getCalendarAttendanceStatus(event.id, savedEventIds, attendanceByEventId),
+      attendanceStatus: getCalendarAttendanceStatus(
+        event.id,
+        savedEventIds,
+        attendanceByEventId,
+        event.source === "Manual",
+      ),
     }));
   const busyBlocks: CalendarBusyBlock[] = (busyIntervals ?? [])
     .filter((interval) =>

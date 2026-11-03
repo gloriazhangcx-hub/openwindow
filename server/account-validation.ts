@@ -7,6 +7,7 @@ import {
   type BusyInterval,
   type EventItem,
   type Format,
+  type ManualEventInput,
   type Preferences,
   type Topic,
 } from "../src/types";
@@ -75,6 +76,71 @@ function validTimeZone(value: unknown): value is string {
   } catch {
     return false;
   }
+}
+
+function validIsoInstant(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|([+-])(\d{2}):(\d{2}))$/,
+  );
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second, , , offsetHour, offsetMinute] = match;
+  const parts = [Number(year), Number(month), Number(day), Number(hour), Number(minute), Number(second)];
+  const [y, m, d, h, min, sec] = parts;
+  const date = new Date(Date.UTC(y, m - 1, d, h, min, sec));
+  if (
+    date.getUTCFullYear() !== y ||
+    date.getUTCMonth() !== m - 1 ||
+    date.getUTCDate() !== d ||
+    date.getUTCHours() !== h ||
+    date.getUTCMinutes() !== min ||
+    date.getUTCSeconds() !== sec
+  ) return false;
+  if (offsetHour !== undefined && (Number(offsetHour) > 23 || Number(offsetMinute) > 59)) return false;
+  return Number.isFinite(Date.parse(value));
+}
+
+export function parseManualEventInput(value: unknown): ManualEventInput | null {
+  if (!isRecord(value)) return null;
+  const allowed = new Set([
+    "title", "description", "start", "end", "timeZone", "location", "eventUrl", "topics", "formats",
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) return null;
+  const title = typeof value.title === "string" ? value.title.trim() : "";
+  const description = typeof value.description === "string" ? value.description.trim() : null;
+  const location = typeof value.location === "string" ? value.location.trim() : null;
+  const eventUrl = typeof value.eventUrl === "string" ? value.eventUrl.trim() : null;
+  const topics = stringArray(value.topics, TOPICS, 20, 80);
+  const formats = stringArray(value.formats, FORMATS, 20, 80);
+  if (
+    !title || title.length > 240 ||
+    description === null || description.length > 8_000 ||
+    location === null || location.length > 240 ||
+    eventUrl === null || eventUrl.length > 2_000 ||
+    !validIsoInstant(value.start) || !validIsoInstant(value.end) ||
+    Date.parse(value.end) <= Date.parse(value.start) ||
+    !validTimeZone(value.timeZone) ||
+    !topics || !formats
+  ) return null;
+  if (eventUrl) {
+    try {
+      const parsedUrl = new URL(eventUrl);
+      if (!["http:", "https:"].includes(parsedUrl.protocol) || !parsedUrl.hostname) return null;
+    } catch {
+      return null;
+    }
+  }
+  return {
+    title,
+    description,
+    start: new Date(value.start).toISOString(),
+    end: new Date(value.end).toISOString(),
+    timeZone: value.timeZone,
+    location,
+    eventUrl,
+    topics: topics as Topic[],
+    formats: formats as Format[],
+  };
 }
 
 export function parseBusyIntervals(value: unknown): BusyInterval[] | null {
