@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_PREFERENCES, demoEvents } from "../data/events";
 import type { EventItem } from "../types";
-import { filterEvents } from "./event-filtering";
+import { filterEvents, type EventFilterOptions } from "./event-filtering";
 
 const now = Date.parse("2027-01-01T12:00:00.000Z");
 const eventAt = (id: string, daysFromNow: number, overrides: Partial<EventItem> = {}): EventItem => ({
@@ -62,6 +62,94 @@ test("empty topic and format selections allow all matching availability states",
     },
   );
   assert.deepEqual(result.map((event) => event.id), ["available", "unknown"]);
+});
+
+test("search matches every case-insensitive term in event titles or descriptions", () => {
+  const titleMatch = eventAt("title", 1, {
+    title: "OpenWindow Founder Meetup",
+    description: "Meet people building useful products.",
+  });
+  const descriptionMatch = eventAt("description", 2, {
+    title: "Community Gathering",
+    description: "A welcoming WORKSHOP for early-stage founders.",
+  });
+  const missingTerm = eventAt("missing", 3, {
+    title: "Founder breakfast",
+    description: "Coffee and conversation.",
+  });
+  const result = filterEvents([missingTerm, descriptionMatch, titleMatch], {
+    preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
+    availabilityByEvent: {},
+    attendanceByEventId: {},
+    savedEventIds: [],
+    selectedTopics: [],
+    selectedFormats: [],
+    availabilityFilter: "all",
+    attendanceStatusFilter: "all",
+    savedOnly: false,
+    searchQuery: "  FOUNDER   workshop ",
+    now,
+  });
+
+  assert.deepEqual(result.map((event) => event.id), ["description"]);
+  const titleResult = filterEvents([titleMatch, descriptionMatch, missingTerm], {
+    preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
+    availabilityByEvent: {},
+    attendanceByEventId: {},
+    savedEventIds: [],
+    selectedTopics: [],
+    selectedFormats: [],
+    availabilityFilter: "all",
+    attendanceStatusFilter: "all",
+    savedOnly: false,
+    searchQuery: "openwindow meetup",
+    now,
+  });
+  assert.deepEqual(titleResult.map((event) => event.id), ["title"]);
+});
+
+test("search combines with existing filters, and a cleared query preserves their results", () => {
+  const matching = eventAt("matching", 1, {
+    title: "Open data founders",
+    description: "A community meetup.",
+    topics: ["Startups"],
+    formats: ["Networking"],
+  });
+  const wrongTopic = eventAt("topic", 2, { title: "Open data founders", topics: ["Social Impact"] });
+  const wrongFormat = eventAt("format", 3, { title: "Open data founders", formats: ["Demo"] });
+  const wrongAvailability = eventAt("availability", 4, { title: "Open data founders" });
+  const noSearchTerm = eventAt("no-search", 2, {
+    title: "Community founders",
+    description: "A useful gathering.",
+    topics: ["Startups"],
+    formats: ["Networking"],
+  });
+  const events = [wrongAvailability, wrongFormat, wrongTopic, matching, noSearchTerm];
+  const options: EventFilterOptions = {
+    preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
+    availabilityByEvent: {
+      matching: "conflict" as const,
+      topic: "conflict" as const,
+      format: "conflict" as const,
+      availability: "available" as const,
+      "no-search": "conflict" as const,
+    },
+    attendanceByEventId: {},
+    savedEventIds: [],
+    selectedTopics: ["Startups"],
+    selectedFormats: ["Networking"],
+    availabilityFilter: "conflict",
+    attendanceStatusFilter: "all",
+    savedOnly: false,
+    now,
+  };
+  const matchingResults = filterEvents(events, { ...options, searchQuery: "open founders" });
+  const clearedSearchResults = filterEvents(events, { ...options, searchQuery: "  " });
+  const noSearchResults = filterEvents(events, options);
+
+  assert.deepEqual(matchingResults.map((event) => event.id), ["matching"]);
+  assert.deepEqual(clearedSearchResults.map((event) => event.id), noSearchResults.map((event) => event.id));
+  assert.deepEqual(noSearchResults.map((event) => event.id), ["matching", "no-search"]);
 });
 
 test("attendance filters apply only in My Events and default older saves to Interested", () => {

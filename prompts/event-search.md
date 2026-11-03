@@ -29,3 +29,9 @@ Implement Event Search in the existing OpenWindow project:
 - Pass filtered suggested events to Calendar while continuing to pass personal busy intervals separately and unchanged.
 - Retain existing filter reset behavior while making sure it also clears the search query.
 - Use the existing Node test runner and add focused tests for matching, combined filters, clearing the query, and calendar commitment/conflict invariants.
+
+## Automated verification
+
+- `npm test` — 41 passed, 0 failed, 0 skipped.
+- `npm run typecheck` — passed.
+- `npm run build` — passed.
