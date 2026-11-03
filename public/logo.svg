@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 176 40" role="img" aria-labelledby="title">
+  <title id="title">OpenWindow</title>
+  <rect x="2" y="3" width="34" height="34" rx="11" fill="#5b4699"/>
+  <path d="M12 21a7 7 0 1 1 14 0" fill="none" stroke="#fffefa" stroke-width="1.8" stroke-linecap="round"/>
+  <circle cx="27.5" cy="12.5" r="3" fill="#e7c24d"/>
+  <text x="44" y="27" fill="#40316f" font-family="DM Sans, sans-serif" font-size="21" font-weight="700" letter-spacing="-1">openwindow</text>
+</svg>

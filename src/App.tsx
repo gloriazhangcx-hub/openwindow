@@ -1,9 +1,12 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark, CalendarDays, Check, ChevronLeft, ChevronRight, ExternalLink, Heart,
   LayoutList, MapPin, Settings2, Sparkles, X, Download, Upload,
   RotateCcw, SlidersHorizontal,
 } from "lucide-react";
+import { useClerk, useUser } from "@clerk/react";
+import { Link } from "wouter";
+import { basePath } from "./lib/clerk-config";
 import { useOpenWindow } from "./lib/useOpenWindow";
 import { getVisibleMinuteRange } from "./lib/calendar-grid";
 import {
@@ -13,13 +16,13 @@ import {
   type CalendarMode,
 } from "./lib/calendar-views";
 import { findNearestUpcomingSavedEvent } from "./lib/saved-events";
+import { filterEvents } from "./lib/event-filtering";
 import type { Availability, BusyInterval, EventItem, Format, Preferences, Topic } from "./types";
 import { FORMATS, TOPICS } from "./types";
 
 type View = "list" | "calendar";
 type AvailabilityFilter = "all" | Availability;
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const fmtDate = (date: Date, options: Intl.DateTimeFormatOptions, zone = "America/Los_Angeles") =>
   new Intl.DateTimeFormat("en-US", { ...options, timeZone: zone }).format(date);
 const dayKey = (date: Date, zone = "America/Los_Angeles") =>
@@ -77,6 +80,8 @@ function initialCalendarMode(): CalendarMode {
 }
 
 function App() {
+  const { user, isLoaded } = useUser();
+  const { signOut } = useClerk();
   const model = useOpenWindow();
   const [view, setView] = useState<View>(() =>
     new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "list",
@@ -92,6 +97,12 @@ function App() {
   const [toast, setToast] = useState("");
   const toastTimer = useRef<number | undefined>(undefined);
 
+  useEffect(() => {
+    if (!model.accountReady) return;
+    setSelectedTopics(model.preferences.topics);
+    setSelectedFormats(model.preferences.formats);
+  }, [model.accountReady, model.preferences.topics, model.preferences.formats]);
+
   const showToast = (message: string) => {
     setToast(message);
     window.clearTimeout(toastTimer.current);
@@ -101,20 +112,15 @@ function App() {
   const toggleIn = <T,>(list: T[], item: T, setter: (next: T[]) => void) =>
     setter(list.includes(item) ? list.filter((value) => value !== item) : [...list, item]);
 
-  const filteredEvents = useMemo(() => {
-    const now = Date.now();
-    return model.events.filter((event) => {
-      const start = Date.parse(event.start);
-      if (!Number.isFinite(start) || start < now - 60 * 60 * 1000 || start > now + model.preferences.dateHorizonDays * DAY_MS) return false;
-      const cityMatch = model.preferences.cities.length === 0 || model.preferences.cities.some((city) => event.city.toLowerCase().includes(city.toLowerCase()));
-      if (!cityMatch) return false;
-      if (selectedTopics.length && !selectedTopics.some((topic) => event.topics.includes(topic))) return false;
-      if (selectedFormats.length && !selectedFormats.some((format) => event.formats.includes(format))) return false;
-      if (availabilityFilter !== "all" && model.availabilityByEvent[event.id] !== availabilityFilter) return false;
-      if (savedOnly && !model.savedEventIds.includes(event.id)) return false;
-      return true;
-    }).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
-  }, [model.events, model.preferences, model.availabilityByEvent, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, savedOnly]);
+  const filteredEvents = useMemo(() => filterEvents(model.events, {
+    preferences: model.preferences,
+    availabilityByEvent: model.availabilityByEvent,
+    savedEventIds: model.savedEventIds,
+    selectedTopics,
+    selectedFormats,
+    availabilityFilter,
+    savedOnly,
+  }), [model.events, model.preferences, model.availabilityByEvent, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, savedOnly]);
 
   const dateGroups = useMemo(() => {
     const groups = new Map<string, EventItem[]>();
@@ -139,7 +145,7 @@ function App() {
 
   const saveEvent = (event: EventItem) => {
     const wasSaved = model.savedEventIds.includes(event.id);
-    model.saveEvent(event.id);
+    model.saveEvent(event);
     if (!wasSaved && view === "calendar") {
       const candidates = [
         ...filteredEvents.filter((candidate) => candidate.id !== event.id),
@@ -151,7 +157,9 @@ function App() {
       );
       if (nearest) setCalendarDate(atCalendarNoon(safeDate(nearest.start)));
     }
-    showToast(wasSaved ? "Removed from saved events" : "Saved for later");
+    showToast(wasSaved
+      ? "Removed from saved events"
+      : model.isAuthenticated ? "Saved to your account" : "Saved on this device · Sign in to sync");
   };
 
   const toggleSavedOnly = () => {
@@ -199,6 +207,19 @@ function App() {
           <span className="source-pill" title="Events currently come from the local demo dataset">
             <span className="source-dot" /> Demo mode
           </span>
+          <div className="account-links" aria-label="Account">
+            {isLoaded && user ? (
+              <>
+                <span className="account-name">{user.firstName || "Your account"}</span>
+                <button className="text-button account-button" type="button" onClick={() => void signOut({ redirectUrl: basePath || "/" })}>Sign out</button>
+              </>
+            ) : (
+              <>
+                <Link className="text-button account-button" href="/sign-in">Sign in</Link>
+                <Link className="button primary account-signup" href="/sign-up">Sign up</Link>
+              </>
+            )}
+          </div>
           <button className="text-button" onClick={() => setPreferencesOpen(true)}><Settings2 size={16} /> Preferences</button>
         </div>
       </header>
@@ -278,6 +299,10 @@ function App() {
 
       {activeEvent && <EventModal event={activeEvent} availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"} saved={model.savedEventIds.includes(activeEvent.id)} onSave={() => saveEvent(activeEvent)} onClose={() => setActiveEvent(null)} />}
       {preferencesOpen && <PreferencesModal preferences={model.preferences} syncStatus={model.syncStatus} busyOrigin={model.busyOrigin} onSave={(preferences) => { model.updatePreferences(preferences); setSelectedTopics(preferences.topics); setSelectedFormats(preferences.formats); setPreferencesOpen(false); showToast("Your preferences are saved"); }} onClose={() => setPreferencesOpen(false)} onImport={onImport} onClearImport={() => { model.clearImportedBusyIntervals(); showToast("Demo calendar sample restored"); }} />}
+      {model.isAuthenticated && model.persistenceStatus === "error" && <div className="sync-alert" role="status">
+        <span>Account sync needs attention. Your local data is still preserved.</span>
+        <button type="button" onClick={model.retryAccountSync}>Retry</button>
+      </div>}
       {toast && <div role="status" className="toast">{toast}</div>}
     </div>
   );
@@ -539,7 +564,7 @@ function PreferencesModal({ preferences, syncStatus, busyOrigin, onSave, onClose
           {busyOrigin === "Imported locally" && <button type="button" className="button secondary" onClick={onClearImport}><RotateCcw size={14} /> Restore demo sample</button>}
         </div>
         {importMessage && <p className={`import-message ${importMessage.includes("successfully") ? "" : "error"}`} role="status">{importMessage}</p>}
-        <p className="filter-note">Calendar files are read on this device. Imported calendar times remain local and are never uploaded by this workspace.</p>
+         <p className="filter-note">Imported calendar times stay on this device while signed out. When signed in, they are saved privately to your account.</p>
         <div className="modal-actions" style={{ marginTop: 19 }}>
           <button className="button primary" onClick={() => onSave({
             keywords: preferences.keywords,
