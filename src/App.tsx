@@ -117,6 +117,7 @@ function App() {
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
   const [selectedFormats, setSelectedFormats] = useState<Format[]>(model.preferences.formats);
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<AttendanceStatusFilter>("all");
   const [savedOnly, setSavedOnly] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
@@ -147,9 +148,10 @@ function App() {
     selectedTopics,
     selectedFormats,
     availabilityFilter,
+    searchQuery,
     attendanceStatusFilter,
     savedOnly,
-  }), [model.events, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, attendanceStatusFilter, savedOnly]);
+  }), [model.events, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, searchQuery, attendanceStatusFilter, savedOnly]);
 
   const dateGroups = useMemo(() => {
     const groups = new Map<string, EventItem[]>();
@@ -204,6 +206,7 @@ function App() {
     setSelectedTopics([]);
     setSelectedFormats([]);
     setAvailabilityFilter("all");
+    setSearchQuery("");
     setAttendanceStatusFilter("all");
     setSavedOnly(false);
   };
@@ -261,6 +264,19 @@ function App() {
               <div className="sidebar-title"><SlidersHorizontal size={14} style={{ verticalAlign: "-2px", marginRight: 7 }} /> Refine your window</div>
               <button className="reset-button" onClick={clearFilters}>Reset</button>
             </div>
+            <section className="filter-section search-filter-section">
+              <label className="filter-label" htmlFor="event-search">Search events</label>
+              <input
+                id="event-search"
+                className="event-search-input"
+                type="search"
+                aria-label="Search events by title or description"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Title or description"
+                autoComplete="off"
+              />
+            </section>
             <section className="filter-section">
               <div className="filter-label">Topics <small>{selectedTopics.length ? `${selectedTopics.length} selected` : "choose any"}</small></div>
               <div className="chips">{TOPICS.map((topic) => <button key={topic} className={`chip ${selectedTopics.includes(topic) ? "active" : ""}`} aria-pressed={selectedTopics.includes(topic)} onClick={() => toggleIn(selectedTopics, topic, setSelectedTopics)}>{topic}</button>)}</div>
@@ -354,13 +370,27 @@ function App() {
               </div> : <EmptyState
                 savedOnly={savedOnly}
                 attendanceFiltered={attendanceStatusFilter !== "all"}
+                searchActive={Boolean(searchQuery.trim())}
                 onReset={() => {
                   if (savedOnly && attendanceStatusFilter !== "all") setAttendanceStatusFilter("all");
                   else clearFilters();
                 }}
+                onClearSearch={() => setSearchQuery("")}
                 onPreferences={() => setPreferencesOpen(true)}
               />
             ) : (
+              <>
+              {calendarEvents.length === 0 && (
+                <div className="calendar-empty-note" role="status">
+                  <div>
+                    <strong>No suggested events match this calendar view.</strong>
+                    <p>Your personal calendar commitments are still shown. Adjust your filters or search for another event.</p>
+                  </div>
+                  {searchQuery.trim() && (
+                    <button className="text-button" type="button" onClick={() => setSearchQuery("")}>Clear search</button>
+                  )}
+                </div>
+              )}
               <CalendarView
                 date={calendarDate}
                 mode={calendarMode}
@@ -376,6 +406,7 @@ function App() {
                 onSelectDate={(date) => { setCalendarDate(atCalendarNoon(date)); setCalendarMode("day"); }}
                 onEvent={setActiveEvent}
               />
+              </>
             )}
           </section>
         </div>
@@ -461,20 +492,31 @@ function AttendanceControl({
   );
 }
 
-function EmptyState({ savedOnly, attendanceFiltered, onReset, onPreferences }: {
+function EmptyState({ savedOnly, attendanceFiltered, searchActive, onReset, onClearSearch, onPreferences }: {
   savedOnly: boolean;
   attendanceFiltered: boolean;
+  searchActive: boolean;
   onReset: () => void;
+  onClearSearch: () => void;
   onPreferences: () => void;
 }) {
+  const title = searchActive
+    ? savedOnly ? "No saved events match these filters." : "No events match these filters."
+    : savedOnly
+      ? attendanceFiltered ? "No events match this status." : "No events in My Events yet."
+      : "A little quiet in this window.";
+  const description = searchActive
+    ? "Try another keyword or clear your search. Your other filters will stay in place."
+    : savedOnly
+      ? attendanceFiltered ? "Choose All or another status to see more of your saved events." : "Use the bookmark on any event to add it here."
+      : "Try a broader topic, or open your preferences to make room for more kinds of events.";
   return <div className="empty-state">
     <div><div className="empty-orbit"><Sparkles size={22} /></div>
-      <h3>{savedOnly ? attendanceFiltered ? "No events match this status." : "No events in My Events yet." : "A little quiet in this window."}</h3>
-      <p>{savedOnly
-        ? attendanceFiltered ? "Choose All or another status to see more of your saved events." : "Use the bookmark on any event to add it here."
-        : "Try a broader topic, or open your preferences to make room for more kinds of events."}</p>
-      {!savedOnly && <button className="button secondary" onClick={onPreferences}>Adjust preferences</button>}
-      {savedOnly && <button className="button secondary" onClick={onReset}>{attendanceFiltered ? "Show all saved events" : "Show all events"}</button>}
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {searchActive && <button className="button secondary" onClick={onClearSearch}>Clear search</button>}
+      {!searchActive && !savedOnly && <button className="button secondary" onClick={onPreferences}>Adjust preferences</button>}
+      {!searchActive && savedOnly && <button className="button secondary" onClick={onReset}>{attendanceFiltered ? "Show all saved events" : "Show all events"}</button>}
     </div>
   </div>;
 }
