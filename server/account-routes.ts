@@ -1,8 +1,9 @@
 import express, { type Request, type RequestHandler } from "express";
-import type { BusyInterval, EventItem, Preferences } from "../src/types";
+import type { AttendanceStatus, BusyInterval, EventItem, Preferences } from "../src/types";
 import type { AccountStore, LegacyRawValues } from "./account-store";
 import {
   isPreferences,
+  isAttendanceStatus,
   parseBusyIntervals,
   parseEventItem,
   validRawValues,
@@ -91,6 +92,30 @@ export function createAccountRouter(store: AccountStore, resolveUserId: UserIdRe
     try {
       await store.setSavedEvent(accountId(response), event, request.body.saved);
       return response.json({ saved: request.body.saved });
+    } catch (error) {
+      return sendFailure(response, error);
+    }
+  });
+
+  router.put("/saved-events/attendance", async (request, response) => {
+    if (
+      !record(request.body) ||
+      Object.keys(request.body).some((key) => !["eventId", "status"].includes(key)) ||
+      typeof request.body.eventId !== "string" ||
+      request.body.eventId.length < 1 ||
+      request.body.eventId.length > 180 ||
+      !isAttendanceStatus(request.body.status)
+    ) {
+      return response.status(400).json({ error: "Attendance status update is invalid." });
+    }
+    try {
+      const updated = await store.updateAttendanceStatus(
+        accountId(response),
+        request.body.eventId,
+        request.body.status as AttendanceStatus,
+      );
+      if (!updated) return response.status(404).json({ error: "Saved event was not found." });
+      return response.json({ saved: true, eventId: request.body.eventId, status: request.body.status });
     } catch (error) {
       return sendFailure(response, error);
     }

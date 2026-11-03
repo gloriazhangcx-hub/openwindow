@@ -1,4 +1,12 @@
-import type { Availability, EventItem, Format, Preferences, Topic } from "../types";
+import type {
+  AttendanceStatus,
+  AttendanceStatusFilter,
+  Availability,
+  EventItem,
+  Format,
+  Preferences,
+  Topic,
+} from "../types";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -7,10 +15,12 @@ export type AvailabilityFilter = "all" | Availability;
 export interface EventFilterOptions {
   preferences: Preferences;
   availabilityByEvent: Record<string, Availability>;
+  attendanceByEventId: Record<string, AttendanceStatus>;
   savedEventIds: string[];
   selectedTopics: Topic[];
   selectedFormats: Format[];
   availabilityFilter: AvailabilityFilter;
+  attendanceStatusFilter: AttendanceStatusFilter;
   savedOnly: boolean;
   now?: number;
 }
@@ -31,6 +41,11 @@ export function filterEvents(events: EventItem[], options: EventFilterOptions): 
     if (options.selectedFormats.length && !options.selectedFormats.some((format) => event.formats.includes(format))) return false;
     if (options.availabilityFilter !== "all" && options.availabilityByEvent[event.id] !== options.availabilityFilter) return false;
     if (options.savedOnly && !options.savedEventIds.includes(event.id)) return false;
+    if (
+      options.savedOnly &&
+      options.attendanceStatusFilter !== "all" &&
+      (options.attendanceByEventId[event.id] ?? "interested") !== options.attendanceStatusFilter
+    ) return false;
     return true;
   }).sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 }

@@ -1,5 +1,15 @@
 import { DEFAULT_PREFERENCES } from "../src/data/events";
-import { FORMATS, TOPICS, type BusyInterval, type EventItem, type Format, type Preferences, type Topic } from "../src/types";
+import {
+  ATTENDANCE_STATUSES,
+  FORMATS,
+  TOPICS,
+  type AttendanceStatus,
+  type BusyInterval,
+  type EventItem,
+  type Format,
+  type Preferences,
+  type Topic,
+} from "../src/types";
 
 const maxRawValueLength = 512_000;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -155,4 +165,8 @@ export function validRawValues(value: unknown): value is Record<"preferences" | 
 
 export function isPreferences(value: unknown): value is Preferences {
   return Boolean(parsePreferences(value));
+}
+
+export function isAttendanceStatus(value: unknown): value is AttendanceStatus {
+  return typeof value === "string" && ATTENDANCE_STATUSES.includes(value as AttendanceStatus);
 }

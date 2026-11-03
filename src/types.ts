@@ -18,6 +18,15 @@ export const FORMATS = [
 export type Topic = (typeof TOPICS)[number];
 export type Format = (typeof FORMATS)[number];
 export type Availability = "available" | "conflict" | "unknown";
+export const ATTENDANCE_STATUSES = ["interested", "planning_to_attend", "registered"] as const;
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
+export const ATTENDANCE_STATUS_LABELS: Record<AttendanceStatus, string> = {
+  interested: "Interested",
+  planning_to_attend: "Planning to Attend",
+  registered: "Registered",
+};
+export type AttendanceStatusFilter = "all" | AttendanceStatus;
 
 export interface EventItem {
   id: string;

@@ -25,7 +25,9 @@ The first seven stories are the required course spine; the last three are OpenWi
 
 ## 3. Database design (intended schema)
 
-Use a relational database and server-enforced user ownership. Exact SQL types and authentication provider will be finalized against the existing Replit stack before the first implementation PR. Times are stored as timezone-aware timestamps. Public source events and user-owned records must remain distinct.
+Use a relational database and server-enforced user ownership. Times are stored as timezone-aware timestamps. Public source events and user-owned records must remain distinct.
+
+**Current implementation status:** PR #12 added Replit-managed Clerk session verification and PostgreSQL persistence through Drizzle and `pg`. The shipped schema uses Clerk-linked users, per-user event snapshots, separate `saved_events` and `stars` relationships, multi-label topic/format relations, busy intervals, preferences, and migration snapshots. The table below remains the intended course-level model; it is not a literal dump of the shipped schema.
 
 | Table | Columns (type; `PK` / `FK` noted) | Relationships / purpose |
 |---|---|---|
@@ -52,10 +54,10 @@ For each: save a plain-English explanation, an actual failing **red** run after 
 
 - **AI coding agent:** Replit Agent, to implement small features iteratively while I inspect and approve changes.
 - **Frontend:** retain the existing React + TypeScript app and plain CSS. Reuse the current Discover/List and custom Calendar components, which already support Day, Week, and Month views with solid commitments and dashed possible events; do not migrate to Tailwind or replace the calendar with FullCalendar.
-- **Backend/database/auth:** retain the existing Express + TypeScript server. Proposed persistence: Replit PostgreSQL through `DATABASE_URL`, accessed by the Node `pg` driver; neither the SQL schema nor driver is currently wired into the repository. Proposed end-user authentication: Replit-managed Clerk for signup, login, and session identity, with Express API routes verifying the session and enforcing ownership. Clerk is not configured in this workspace. The existing `SESSION_SECRET` is only used for Luma OAuth session cookies, not app login. These are proposed technologies, not claims about installed infrastructure.
+- **Backend/database/auth:** retain the existing Express + TypeScript server. **Implemented in PR #12:** Replit-managed Clerk for signup, login, logout, and verified session identity; PostgreSQL through `DATABASE_URL`, accessed with Drizzle and the Node `pg` driver; and account routes that enforce ownership from the server-verified Clerk user. Existing localStorage migration preserves the original raw values. The existing `SESSION_SECRET` is only used for Luma OAuth session cookies, not app login. Event CRUD, attendance status, Stars UI, and the remaining course stories are still planned work.
 - **Event integration:** existing Luma MCP adapter and mock provider. OAuth and tool discovery have been verified, but authenticated real `tools/call` event retrieval is **not yet confirmed**; do not label fixture events as live.
 - **Calendar input:** current calendar-import prototype; Apple Calendar Shortcut busy-only sync is a later integration, with minimal private data collection.
-- **Hosting:** existing Replit deployment for the live demo. **Version control:** existing private GitHub repository; every new change follows Issue → branch → saved prompt (`prompts/<feature>.md`) → PR with `Closes #N` → review/merge → deploy. Never commit directly to `main`. First safely reconcile the divergent local checkout and GitHub history without overwriting work.
+- **Hosting:** existing Replit deployment for the live demo. **Version control:** existing private GitHub repository; every new change follows Issue → branch → saved prompt (`prompts/<feature>.md`) → PR with `Closes #N` → review/merge → deploy. Never commit directly to `main`. GitHub `main` includes the merged course plan and PR #12; course branches start from verified GitHub `main`, separately from the preserved local prototype worktree and draft Luma PR #8.
 
 ## 6. Design and experience
 
@@ -73,7 +75,7 @@ Preserve sections 1–7 as the formal plan; fill this table with actual implemen
 
 | Planned feature | Shipped / Changed / Cut | Done / Backlogged | What changed and why; evidence |
 |---|---|---|---|
-| Accounts, database, isolation | TBD | TBD | TBD |
+| Accounts, database, isolation | Shipped | Done | PR #12 added Clerk authentication, PostgreSQL/Drizzle persistence, server-side ownership checks, and local-storage migration. The user manually verified sign-in, save, refresh persistence, sign-out, and account isolation. |
 | Event CRUD and validation | TBD | TBD | TBD |
 | Stars and Starred view | TBD | TBD | TBD |
 | Search, multi-label filters, sort | TBD | TBD | TBD |

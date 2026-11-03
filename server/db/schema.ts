@@ -1,5 +1,7 @@
-import type { Preferences, Topic, Format } from "../../src/types";
+import { sql } from "drizzle-orm";
+import type { AttendanceStatus, Preferences, Topic, Format } from "../../src/types";
 import {
+  check,
   index,
   jsonb,
   pgTable,
@@ -79,10 +81,18 @@ export const savedEvents = pgTable(
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     eventId: uuid("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    attendanceStatus: varchar("attendance_status", { length: 32 })
+      .$type<AttendanceStatus>()
+      .notNull()
+      .default("interested"),
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.eventId] }),
     index("saved_events_user_id_idx").on(table.userId),
+    check(
+      "saved_events_attendance_status_check",
+      sql`${table.attendanceStatus} in ('interested', 'planning_to_attend', 'registered')`,
+    ),
   ],
 );
 
