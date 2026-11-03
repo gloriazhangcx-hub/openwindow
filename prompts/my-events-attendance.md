@@ -27,4 +27,6 @@
 - `npm run typecheck` — passed.
 - `npm run build` — passed.
 - Captured desktop and mobile screenshots from an isolated demo-mode server on port 5090; the existing Preview workflow and prototype worktree were not changed.
-- The additive schema migration and PostgreSQL-backed persistence test still need development-database verification after review. No database migration was run against production, and the app was not published.
+- Confirmed the Replit development database (heliumdb): it had two saved relationships and no attendance column before migration. Applied the schema-equivalent additive column and allowed-value check in development only; both existing rows remained and defaulted to Interested.
+    - Ran a rollback-only development SQL smoke test with temporary users/events: new saves defaulted to Interested, a status update persisted in the transaction, another user's update affected zero rows, and all fixtures were rolled back.
+    - The automated PostgreSQL account-store test remains skipped in the shell suite because database connection variables were deliberately unset to prevent accidental production access. Production was not queried or changed, and the app was not published.
