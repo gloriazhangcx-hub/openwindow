@@ -3,7 +3,7 @@
 - Issue: https://github.com/gloriazhangcx-hub/openwindow/issues/11
 - Branch: `feature/11-auth-db-persistence`
 - Base commit: `02ea7eaefcb350814ad2cd3471c87e1be2222068` (GitHub `main`).
-- Status: implementation complete on the feature branch; PR creation is pending final verification.
+- Status: implementation complete; PR #12 is open for review and has not been merged.
 
 ## User request
 
@@ -56,4 +56,4 @@ Issue → branch from the verified GitHub `main` SHA above → prompt log → im
 
 - Replit-managed Clerk development keys and the development PostgreSQL connection are available in this workspace; their values are intentionally not recorded here.
 - Production database configuration/schema and a real sign-in should be verified before publishing.
-- This branch has not been merged. Open the resulting PR and review it before merging Issue #11.
+- PR: https://github.com/gloriazhangcx-hub/openwindow/pull/12 (open, not merged). Issue #11 remains open until merge.
