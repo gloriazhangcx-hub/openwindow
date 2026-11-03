@@ -18,9 +18,17 @@ import {
 import { findNearestUpcomingSavedEvent } from "./lib/saved-events";
 import { filterEvents } from "./lib/event-filtering";
 import {
+  countCalendarBusyIntervalsForDay,
+  getCalendarAttendanceStatus,
+  getCalendarDayBlocks,
+  getCalendarEventAccessibleLabel,
+} from "./lib/calendar-blocks";
+import { CalendarAttendanceMarker } from "./components/CalendarAttendanceMarker";
+import {
   ATTENDANCE_STATUSES,
   ATTENDANCE_STATUS_LABELS,
   type AttendanceStatus,
+  type AttendanceStatusFilter,
   type Availability,
   type BusyInterval,
   type EventItem,
@@ -109,6 +117,7 @@ function App() {
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
   const [selectedFormats, setSelectedFormats] = useState<Format[]>(model.preferences.formats);
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
+  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<AttendanceStatusFilter>("all");
   const [savedOnly, setSavedOnly] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -133,12 +142,14 @@ function App() {
   const filteredEvents = useMemo(() => filterEvents(model.events, {
     preferences: model.preferences,
     availabilityByEvent: model.availabilityByEvent,
+    attendanceByEventId: model.attendanceByEventId,
     savedEventIds: model.savedEventIds,
     selectedTopics,
     selectedFormats,
     availabilityFilter,
+    attendanceStatusFilter,
     savedOnly,
-  }), [model.events, model.preferences, model.availabilityByEvent, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, savedOnly]);
+  }), [model.events, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.savedEventIds, selectedTopics, selectedFormats, availabilityFilter, attendanceStatusFilter, savedOnly]);
 
   const dateGroups = useMemo(() => {
     const groups = new Map<string, EventItem[]>();
@@ -193,6 +204,7 @@ function App() {
     setSelectedTopics([]);
     setSelectedFormats([]);
     setAvailabilityFilter("all");
+    setAttendanceStatusFilter("all");
     setSavedOnly(false);
   };
 
@@ -291,6 +303,21 @@ function App() {
                     <ChevronLeft size={14} /> Full Discover
                   </button>
                 )}
+                {savedOnly && (
+                  <label className="attendance-filter">
+                    <span>Status</span>
+                    <select
+                      aria-label="Filter My Events by attendance status"
+                      value={attendanceStatusFilter}
+                      onChange={(event) => setAttendanceStatusFilter(event.target.value as AttendanceStatusFilter)}
+                    >
+                      <option value="all">All</option>
+                      {ATTENDANCE_STATUSES.map((status) => (
+                        <option key={status} value={status}>{ATTENDANCE_STATUS_LABELS[status]}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <span className="count-label">
                   {view === "calendar"
                     ? `${calendarEvents.length} ${calendarMode === "week" ? "this week" : calendarMode === "day" ? "in day" : "in month view"} · ${filteredEvents.length} total`
@@ -324,7 +351,15 @@ function App() {
                   </section>
                 ))}
                 <div className="footer-note"><span>Local times · Suggestions, not bookings.</span></div>
-              </div> : <EmptyState savedOnly={savedOnly} onReset={() => { clearFilters(); }} onPreferences={() => setPreferencesOpen(true)} /> 
+              </div> : <EmptyState
+                savedOnly={savedOnly}
+                attendanceFiltered={attendanceStatusFilter !== "all"}
+                onReset={() => {
+                  if (savedOnly && attendanceStatusFilter !== "all") setAttendanceStatusFilter("all");
+                  else clearFilters();
+                }}
+                onPreferences={() => setPreferencesOpen(true)}
+              />
             ) : (
               <CalendarView
                 date={calendarDate}
@@ -333,6 +368,8 @@ function App() {
                 events={calendarEvents}
                 busyIntervals={model.busyIntervals}
                 availability={model.availabilityByEvent}
+                savedEventIds={model.savedEventIds}
+                attendanceByEventId={model.attendanceByEventId}
                 onModeChange={setCalendarMode}
                 onNavigate={(amount) => setCalendarDate((date) => navigateCalendarDate(date, calendarMode, amount))}
                 onToday={() => setCalendarDate(atCalendarNoon(new Date()))}
@@ -424,20 +461,28 @@ function AttendanceControl({
   );
 }
 
-function EmptyState({ savedOnly, onReset, onPreferences }: { savedOnly: boolean; onReset: () => void; onPreferences: () => void }) {
+function EmptyState({ savedOnly, attendanceFiltered, onReset, onPreferences }: {
+  savedOnly: boolean;
+  attendanceFiltered: boolean;
+  onReset: () => void;
+  onPreferences: () => void;
+}) {
   return <div className="empty-state">
     <div><div className="empty-orbit"><Sparkles size={22} /></div>
-      <h3>{savedOnly ? "No events in My Events yet." : "A little quiet in this window."}</h3>
-      <p>{savedOnly ? "Use the bookmark on any event to add it here." : "Try a broader topic, or open your preferences to make room for more kinds of events."}</p>
+      <h3>{savedOnly ? attendanceFiltered ? "No events match this status." : "No events in My Events yet." : "A little quiet in this window."}</h3>
+      <p>{savedOnly
+        ? attendanceFiltered ? "Choose All or another status to see more of your saved events." : "Use the bookmark on any event to add it here."
+        : "Try a broader topic, or open your preferences to make room for more kinds of events."}</p>
       {!savedOnly && <button className="button secondary" onClick={onPreferences}>Adjust preferences</button>}
-      {savedOnly && <button className="button secondary" onClick={onReset}>Show all events</button>}
+      {savedOnly && <button className="button secondary" onClick={onReset}>{attendanceFiltered ? "Show all saved events" : "Show all events"}</button>}
     </div>
   </div>;
 }
 
-function CalendarView({ date, mode, days, events, busyIntervals, availability, onModeChange, onNavigate, onToday, onSelectDate, onEvent }: {
+function CalendarView({ date, mode, days, events, busyIntervals, availability, savedEventIds, attendanceByEventId, onModeChange, onNavigate, onToday, onSelectDate, onEvent }: {
   date: Date; mode: CalendarMode; days: Date[]; events: EventItem[]; busyIntervals: BusyInterval[] | null;
-  availability: Record<string, Availability>; onModeChange: (mode: CalendarMode) => void;
+  availability: Record<string, Availability>; savedEventIds: string[];
+  attendanceByEventId: Record<string, AttendanceStatus>; onModeChange: (mode: CalendarMode) => void;
   onNavigate: (direction: number) => void; onToday: () => void; onSelectDate: (date: Date) => void;
   onEvent: (event: EventItem) => void;
 }) {
@@ -453,16 +498,6 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, o
     ? "48px minmax(240px, 1fr)"
     : "48px repeat(7, minmax(80px, 1fr))";
   const monthWeekdays = days.slice(0, 7);
-
-  const eventBlocksForDay = (date: Date) => {
-    const day = dayKey(date);
-    return events.filter((event) => dayKey(safeDate(event.start), event.timeZone) === day).map((event) => ({
-      kind: "event" as const, key: event.id, start: safeDate(event.start), end: safeDate(event.end), event, zone: event.timeZone,
-      availability: availability[event.id] ?? "unknown",
-    }));
-  };
-  const busyBlocksForDay = (date: Date) => (busyIntervals ?? []).filter((interval) => dayKey(safeDate(interval.start), interval.timeZone) === dayKey(date, interval.timeZone))
-    .map((interval, index) => ({ kind: "busy" as const, key: `busy-${index}-${interval.start}`, start: safeDate(interval.start), end: safeDate(interval.end), interval, zone: interval.timeZone ?? "America/Los_Angeles" }));
 
   return <div className="calendar-wrap">
     <div className="calendar-top">
@@ -499,9 +534,7 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, o
         <div className="calendar-month-grid">
           {days.map((day) => {
             const dayEvents = events.filter((event) => dayKey(safeDate(event.start), event.timeZone) === dayKey(day));
-            const dayBusyCount = (busyIntervals ?? []).filter((interval) =>
-              dayKey(safeDate(interval.start), interval.timeZone) === dayKey(day, interval.timeZone),
-            ).length;
+            const dayBusyCount = countCalendarBusyIntervalsForDay(day, busyIntervals);
             const currentMonth = day.getMonth() === date.getMonth() && day.getFullYear() === date.getFullYear();
             const today = dayKey(day) === dayKey(new Date());
             return <section className={`month-cell ${currentMonth ? "" : "outside-month"}`} key={day.toISOString()}>
@@ -511,14 +544,25 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, o
                 {fmtDate(day, { day: "numeric" })}
               </button>
               <div className="month-day-events">
-                {dayEvents.slice(0, 3).map((event) => (
-                  <button type="button" key={event.id}
+                {dayEvents.slice(0, 3).map((event) => {
+                  const attendanceStatus = getCalendarAttendanceStatus(event.id, savedEventIds, attendanceByEventId);
+                  const accessibleLabel = getCalendarEventAccessibleLabel(
+                    event,
+                    availability[event.id] ?? "unknown",
+                    attendanceStatus,
+                  );
+                  return <button type="button" key={event.id}
                     className={`month-event ${availability[event.id] === "conflict" ? "conflict" : ""}`}
+                    aria-label={accessibleLabel}
+                    title={attendanceStatus
+                      ? `${event.title} · Attendance status: ${ATTENDANCE_STATUS_LABELS[attendanceStatus]}`
+                      : event.title}
                     onClick={() => onEvent(event)}>
+                    {attendanceStatus && <CalendarAttendanceMarker status={attendanceStatus} />}
                     <span>{fmtDate(safeDate(event.start), { hour: "numeric", minute: "2-digit" }, event.timeZone)}</span>
                     <strong>{event.title}</strong>
-                  </button>
-                ))}
+                  </button>;
+                })}
                 {dayEvents.length > 3 && <span className="month-more">+{dayEvents.length - 3} more</span>}
                 {dayBusyCount > 0 && <span className="month-busy">{dayBusyCount} existing</span>}
               </div>
@@ -538,7 +582,14 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, o
         <div className="time-grid" style={{ gridTemplateColumns: columns }}>
           <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1, hourStart + index)))}</div>)}</div>
           {days.map((day) => {
-            const blocks = [...eventBlocksForDay(day), ...busyBlocksForDay(day)]
+            const blocks = getCalendarDayBlocks(
+              day,
+              events,
+              busyIntervals,
+              availability,
+              savedEventIds,
+              attendanceByEventId,
+            )
               .flatMap((block) => {
                 const timeRange = getVisibleMinuteRange(block.start, block.end, block.zone, hourStart, hourStart + hourCount);
                 return timeRange ? [{ ...block, timeRange }] : [];
@@ -557,11 +608,25 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, o
                 const top = (block.timeRange.visibleStartMinute - hourStart * 60) * pxPerMinute;
                 const height = Math.max(18, (block.timeRange.visibleEndMinute - block.timeRange.visibleStartMinute) * pxPerMinute);
                 const busy = block.kind === "busy";
+                const attendanceStatus = block.kind === "event" ? block.attendanceStatus : null;
+                const accessibleLabel = block.kind === "busy"
+                  ? "Existing calendar commitment"
+                  : getCalendarEventAccessibleLabel(block.event, block.availability, block.attendanceStatus);
                 return <button key={block.key} type="button" className={`cal-block ${busy ? "busy" : `suggested ${block.availability === "conflict" ? "conflict" : ""}`}`}
                   style={{ top, height, left: `calc(${block.lane} * (100% - 8px) / ${laneCount} + 4px)`, width: `calc((100% - 8px) / ${laneCount} - 3px)` }}
                   onClick={() => { if (block.kind === "event") onEvent(block.event); }} disabled={busy}
-                  aria-label={busy ? "Existing calendar commitment" : `${block.event.title}, ${availabilityLabel[block.availability]}`}>
-                  <strong>{busy ? "Existing commitment" : block.event.title}</strong>
+                  aria-label={accessibleLabel}
+                  title={block.kind === "event" && attendanceStatus
+                    ? `${block.event.title} · Attendance status: ${ATTENDANCE_STATUS_LABELS[attendanceStatus]}`
+                    : undefined}>
+                  <strong className={busy ? undefined : "calendar-event-title"}>
+                    {busy
+                      ? "Existing commitment"
+                      : <>
+                        {attendanceStatus && <CalendarAttendanceMarker status={attendanceStatus} />}
+                        <span className="calendar-event-title-text">{block.event.title}</span>
+                      </>}
+                  </strong>
                   <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" }, block.zone)}{!busy && ` · ${block.event.city}`}</span>
                 </button>;
               })}

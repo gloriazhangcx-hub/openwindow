@@ -26,6 +26,7 @@ export const ATTENDANCE_STATUS_LABELS: Record<AttendanceStatus, string> = {
   planning_to_attend: "Planning to Attend",
   registered: "Registered",
 };
+export type AttendanceStatusFilter = "all" | AttendanceStatus;
 
 export interface EventItem {
   id: string;
