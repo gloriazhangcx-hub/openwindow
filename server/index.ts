@@ -2,7 +2,17 @@ import express from "express";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import cors from "cors";
+import { clerkMiddleware, getAuth } from "@clerk/express";
+import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { createServer as createViteServer } from "vite";
+import { createAccountRouter } from "./account-routes";
+import { createAccountStore } from "./account-store";
+import {
+  CLERK_PROXY_PATH,
+  clerkProxyMiddleware,
+  getClerkProxyHost,
+} from "./middlewares/clerkProxyMiddleware";
 
 const app = express();
 const httpServer = createServer(app);
@@ -22,6 +32,25 @@ let latestBusyIntervals: BusyInterval[] = [];
 let lastSyncedAt: string | null = null;
 
 app.disable("x-powered-by");
+app.use(CLERK_PROXY_PATH, clerkProxyMiddleware());
+app.use(cors({ credentials: true, origin: true }));
+app.use(
+  clerkMiddleware((req) => ({
+    publishableKey: publishableKeyFromHost(
+      getClerkProxyHost(req) ?? "",
+      process.env.CLERK_PUBLISHABLE_KEY,
+    ),
+  })),
+);
+
+app.use(
+  "/api/account",
+  createAccountRouter(
+    createAccountStore(),
+    (req) => getAuth(req).userId ?? null,
+  ),
+);
+
 app.use(express.json({ limit: maxPayloadBytes, strict: true }));
 
 function validTimeZone(value: unknown): value is string {

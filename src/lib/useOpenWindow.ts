@@ -1,15 +1,20 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "@clerk/react";
 import { DEFAULT_PREFERENCES, demoBusyIntervals, mockEventSource } from "../data/events";
 import { getAvailability } from "./calendar";
+import { accountApi } from "./account-api";
+import {
+  LEGACY_MIGRATED_FOR_KEY,
+  LOCAL_DATA_OWNER_KEY,
+  STORAGE_KEYS,
+  getLegacyMigrationOwner,
+  getLocalDataOwner,
+  preserveLegacyStorage,
+} from "./legacy-storage";
 import type { BusyInterval, CalendarSyncStatus, EventItem, Preferences } from "../types";
 
-const STORAGE_KEYS = {
-  preferences: "openwindow.preferences.v1",
-  saved: "openwindow.saved.v1",
-  busy: "openwindow.busy.v1",
-} as const;
-
 type BusyOrigin = "Demo sample" | "Imported locally" | "Not synced";
+export type PersistenceStatus = "local" | "syncing" | "synced" | "error";
 
 function readStored<T>(key: string, fallback: T): T {
   try {
@@ -32,7 +37,7 @@ function isBusyInterval(value: unknown): value is BusyInterval {
   );
 }
 
-function parseBusyImport(value: unknown): BusyInterval[] {
+export function parseBusyImport(value: unknown): BusyInterval[] {
   let intervals: unknown;
   if (Array.isArray(value)) intervals = value;
   else if (value && typeof value === "object") {
@@ -63,6 +68,53 @@ function readPreferences(): Preferences {
   };
 }
 
+function canHydrateLocalData(isLoaded: boolean, isSignedIn: boolean | undefined, userId: string | null): boolean {
+  const storage = window.localStorage;
+  const localOwner = getLocalDataOwner(storage);
+  const migrationOwner = getLegacyMigrationOwner(storage);
+  if (localOwner) return isLoaded && isSignedIn === true && localOwner === userId;
+  if (migrationOwner) return isLoaded && isSignedIn === true && migrationOwner === userId;
+  return true;
+}
+
+function readBusyState(): { intervals: BusyInterval[] | null; origin: BusyOrigin; lastSyncedAt: string | null } {
+  const stored = localStorage.getItem(STORAGE_KEYS.busy);
+  if (stored !== null) {
+    try {
+      const parsed = JSON.parse(stored) as unknown;
+      const intervals = parseBusyImport(parsed);
+      const lastSyncedAt = parsed && typeof parsed === "object" && "lastSyncedAt" in parsed
+        ? (parsed as { lastSyncedAt?: unknown }).lastSyncedAt
+        : null;
+      return {
+        intervals,
+        origin: "Imported locally",
+        lastSyncedAt: typeof lastSyncedAt === "string" && Number.isFinite(Date.parse(lastSyncedAt))
+          ? lastSyncedAt
+          : new Date().toISOString(),
+      };
+    } catch {
+      // Keep malformed raw data in place. The startup snapshot preserves it.
+      return { intervals: demoBusyIntervals, origin: "Not synced", lastSyncedAt: null };
+    }
+  }
+  return { intervals: demoBusyIntervals, origin: "Demo sample", lastSyncedAt: null };
+}
+
+function writeLegacyValue(key: string, value: string, isSignedIn: boolean | undefined, userId: string | null): boolean {
+  const storage = window.localStorage;
+  const localOwner = getLocalDataOwner(storage);
+  const migrationOwner = getLegacyMigrationOwner(storage);
+  if (!isSignedIn && (localOwner || migrationOwner)) return false;
+  try {
+    storage.setItem(key, value);
+    if (isSignedIn && userId) storage.setItem(LOCAL_DATA_OWNER_KEY, userId);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export interface OpenWindowModel {
   events: EventItem[];
   busyIntervals: BusyInterval[] | null;
@@ -70,75 +122,158 @@ export interface OpenWindowModel {
   savedEventIds: string[];
   preferences: Preferences;
   syncStatus: CalendarSyncStatus;
+  persistenceStatus: PersistenceStatus;
+  accountReady: boolean;
+  isAuthenticated: boolean;
   availabilityByEvent: Record<string, ReturnType<typeof getAvailability>>;
-  saveEvent: (eventId: string) => void;
+  saveEvent: (event: EventItem) => void;
   updatePreferences: (preferences: Preferences) => void;
   importBusyIntervals: (payload: unknown) => number;
   clearImportedBusyIntervals: () => void;
+  retryAccountSync: () => void;
 }
 
 export function useOpenWindow(): OpenWindowModel {
+  const { isLoaded: authLoaded, isSignedIn, userId } = useAuth();
+  const initialLocalAllowed = canHydrateLocalData(authLoaded, isSignedIn, userId ?? null);
   const [events, setEvents] = useState<EventItem[]>([]);
-  const [busyIntervals, setBusyIntervals] = useState<BusyInterval[] | null>(() => {
-    const stored = localStorage.getItem(STORAGE_KEYS.busy);
-    if (stored) {
-      try {
-        return parseBusyImport(JSON.parse(stored));
-      } catch {
-        localStorage.removeItem(STORAGE_KEYS.busy);
-      }
-    }
-    return demoBusyIntervals;
-  });
-  const [busyOrigin, setBusyOrigin] = useState<BusyOrigin>(() =>
-    localStorage.getItem(STORAGE_KEYS.busy) ? "Imported locally" : "Demo sample",
+  const initialBusy = useRef(readBusyState()).current;
+  const [busyIntervals, setBusyIntervals] = useState<BusyInterval[] | null>(
+    initialLocalAllowed ? initialBusy.intervals : demoBusyIntervals,
   );
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => {
-    const stored = localStorage.getItem(STORAGE_KEYS.busy);
-    if (stored) {
-      try {
-        const parsed = JSON.parse(stored) as { lastSyncedAt?: string };
-        if (parsed.lastSyncedAt && Number.isFinite(Date.parse(parsed.lastSyncedAt))) return parsed.lastSyncedAt;
-      } catch {
-        // A bare array payload has no timestamp, so use the time it was imported.
-      }
-      return new Date().toISOString();
-    }
-    return null;
-  });
+  const [busyOrigin, setBusyOrigin] = useState<BusyOrigin>(
+    initialLocalAllowed ? initialBusy.origin : "Demo sample",
+  );
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(
+    initialLocalAllowed ? initialBusy.lastSyncedAt : null,
+  );
   const [savedEventIds, setSavedEventIds] = useState<string[]>(() =>
-    readStored<string[]>(STORAGE_KEYS.saved, []),
+    initialLocalAllowed ? readStored<string[]>(STORAGE_KEYS.saved, []) : [],
   );
-  const [preferences, setPreferences] = useState<Preferences>(readPreferences);
+  const [preferences, setPreferences] = useState<Preferences>(
+    initialLocalAllowed ? readPreferences() : DEFAULT_PREFERENCES,
+  );
+  const [savedEventSnapshots, setSavedEventSnapshots] = useState<EventItem[]>([]);
+  const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>("local");
+  const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const attemptedUserRef = useRef<string | null>(null);
+  const writeQueue = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     void mockEventSource.listEvents().then(setEvents);
   }, []);
 
-  const syncStatus = useMemo<CalendarSyncStatus>(
-    () => ({
-      lastSyncedAt,
-      sourceCount: busyIntervals ? new Set(busyIntervals.map((interval) => interval.sourceId).filter(Boolean)).size : 0,
-      isStale: lastSyncedAt ? Date.now() - Date.parse(lastSyncedAt) > 24 * 60 * 60 * 1000 : false,
-    }),
-    [busyIntervals, lastSyncedAt],
-  );
+  useEffect(() => {
+    if (!authLoaded) return;
+    if (!isSignedIn || !userId) {
+      attemptedUserRef.current = null;
+      setLoadedUserId(null);
+      setSavedEventSnapshots([]);
+      setPersistenceStatus("local");
+      if (!canHydrateLocalData(true, false, null)) {
+        setSavedEventIds([]);
+        setPreferences(DEFAULT_PREFERENCES);
+        setBusyIntervals(demoBusyIntervals);
+        setBusyOrigin("Demo sample");
+        setLastSyncedAt(null);
+      } else {
+        setSavedEventIds(readStored<string[]>(STORAGE_KEYS.saved, []));
+        setPreferences(readPreferences());
+        const localBusy = readBusyState();
+        setBusyIntervals(localBusy.intervals);
+        setBusyOrigin(localBusy.origin);
+        setLastSyncedAt(localBusy.lastSyncedAt);
+      }
+      return;
+    }
+    if (!events.length || attemptedUserRef.current === userId) return;
 
-  const availabilityByEvent = useMemo(
-    () =>
-      Object.fromEntries(events.map((event) => [event.id, getAvailability(event, busyIntervals)])),
-    [busyIntervals, events],
-  );
+    attemptedUserRef.current = userId;
+    setPersistenceStatus("syncing");
+    let cancelled = false;
+    const localOwner = getLocalDataOwner(window.localStorage);
+    const migrationOwner = getLegacyMigrationOwner(window.localStorage);
+    const mayImportLegacy =
+      (!migrationOwner || migrationOwner === userId) &&
+      (!localOwner || localOwner === userId);
+    const canUseThisUserLocalState = !localOwner || localOwner === userId;
 
-  const saveEvent = useCallback((eventId: string) => {
-    setSavedEventIds((previous) => {
-      const next = previous.includes(eventId)
-        ? previous.filter((id) => id !== eventId)
-        : [...previous, eventId];
-      localStorage.setItem(STORAGE_KEYS.saved, JSON.stringify(next));
-      return next;
+    void (async () => {
+      if (mayImportLegacy) {
+        const snapshot = preserveLegacyStorage(window.localStorage);
+        const rawSavedIds = (() => {
+          try {
+            const parsed = JSON.parse(snapshot.rawValues.saved ?? "[]") as unknown;
+            return Array.isArray(parsed) ? new Set(parsed.filter((id): id is string => typeof id === "string")) : new Set<string>();
+          } catch {
+            return new Set<string>();
+          }
+        })();
+        const eventSnapshots = events.filter((event) => rawSavedIds.has(event.id));
+        await accountApi.migrateLocal(snapshot.rawValues, eventSnapshots);
+        if (!migrationOwner) window.localStorage.setItem(LEGACY_MIGRATED_FOR_KEY, userId);
+      }
+
+      const account = await accountApi.getData();
+      if (cancelled) return;
+      setSavedEventIds(account.savedEventIds);
+      setSavedEventSnapshots(account.savedEvents);
+      setPreferences(account.preferences ?? (canUseThisUserLocalState ? readPreferences() : DEFAULT_PREFERENCES));
+      setBusyIntervals(account.busyIntervals.length ? account.busyIntervals : demoBusyIntervals);
+      setBusyOrigin(account.busyIntervals.length ? "Imported locally" : "Demo sample");
+      setLastSyncedAt(account.busyIntervals.length ? new Date().toISOString() : null);
+      if (!localOwner && mayImportLegacy) window.localStorage.setItem(LOCAL_DATA_OWNER_KEY, userId);
+      setLoadedUserId(userId);
+      setPersistenceStatus("synced");
+    })().catch(() => {
+      if (cancelled) return;
+      attemptedUserRef.current = null;
+      setPersistenceStatus("error");
     });
+    return () => {
+      cancelled = true;
+    };
+  }, [authLoaded, isSignedIn, userId, events, retryCount]);
+
+  const accountReady = authLoaded
+    ? isSignedIn
+      ? loadedUserId === userId
+      : !getLocalDataOwner(window.localStorage) && !getLegacyMigrationOwner(window.localStorage)
+    : !getLocalDataOwner(window.localStorage) && !getLegacyMigrationOwner(window.localStorage);
+  const visibleSavedIds = accountReady ? savedEventIds : [];
+  const visiblePreferences = accountReady ? preferences : DEFAULT_PREFERENCES;
+  const visibleBusyIntervals = accountReady ? busyIntervals : demoBusyIntervals;
+  const visibleSavedSnapshots = accountReady ? savedEventSnapshots : [];
+  const displayEvents = useMemo(() => {
+    const byId = new Map(events.map((event) => [event.id, event]));
+    visibleSavedSnapshots.forEach((event) => {
+      if (!byId.has(event.id)) byId.set(event.id, event);
+    });
+    return [...byId.values()];
+  }, [events, visibleSavedSnapshots]);
+
+  const syncWrite = useCallback((operation: () => Promise<unknown>) => {
+    setPersistenceStatus("syncing");
+    writeQueue.current = writeQueue.current
+      .then(() => operation())
+      .then(() => setPersistenceStatus("synced"))
+      .catch(() => setPersistenceStatus("error"));
   }, []);
+
+  const saveEvent = useCallback((event: EventItem) => {
+    const wasSaved = visibleSavedIds.includes(event.id);
+    const nextSaved = !wasSaved;
+    const nextIds = nextSaved
+      ? [...visibleSavedIds, event.id]
+      : visibleSavedIds.filter((id) => id !== event.id);
+    setSavedEventIds(nextIds);
+    setSavedEventSnapshots((previous) => nextSaved
+      ? [...previous.filter((item) => item.id !== event.id), event]
+      : previous.filter((item) => item.id !== event.id));
+    writeLegacyValue(STORAGE_KEYS.saved, JSON.stringify(nextIds), isSignedIn, userId ?? null);
+    if (isSignedIn) syncWrite(() => accountApi.setSavedEvent(event, nextSaved));
+  }, [visibleSavedIds, isSignedIn, userId, syncWrite]);
 
   const updatePreferences = useCallback((nextPreferences: Preferences) => {
     const safePreferences = {
@@ -146,8 +281,9 @@ export function useOpenWindow(): OpenWindowModel {
       dateHorizonDays: Math.max(1, Math.min(30, nextPreferences.dateHorizonDays)),
     };
     setPreferences(safePreferences);
-    localStorage.setItem(STORAGE_KEYS.preferences, JSON.stringify(safePreferences));
-  }, []);
+    writeLegacyValue(STORAGE_KEYS.preferences, JSON.stringify(safePreferences), isSignedIn, userId ?? null);
+    if (isSignedIn) syncWrite(() => accountApi.savePreferences(safePreferences));
+  }, [isSignedIn, userId, syncWrite]);
 
   const importBusyIntervals = useCallback((payload: unknown) => {
     const imported = parseBusyImport(payload);
@@ -155,31 +291,63 @@ export function useOpenWindow(): OpenWindowModel {
     setBusyOrigin("Imported locally");
     const syncedAt = new Date().toISOString();
     setLastSyncedAt(syncedAt);
-    localStorage.setItem(
+    writeLegacyValue(
       STORAGE_KEYS.busy,
       JSON.stringify({ busy: imported, lastSyncedAt: syncedAt }),
+      isSignedIn,
+      userId ?? null,
     );
+    if (isSignedIn) syncWrite(() => accountApi.replaceBusyIntervals(imported));
     return imported.length;
-  }, []);
+  }, [isSignedIn, userId, syncWrite]);
 
   const clearImportedBusyIntervals = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEYS.busy);
+    preserveLegacyStorage(window.localStorage);
+    if (!isSignedIn && (getLocalDataOwner(window.localStorage) || getLegacyMigrationOwner(window.localStorage))) {
+      setBusyIntervals(demoBusyIntervals);
+      setBusyOrigin("Demo sample");
+      setLastSyncedAt(null);
+      return;
+    }
+    window.localStorage.removeItem(STORAGE_KEYS.busy);
     setBusyIntervals(demoBusyIntervals);
     setBusyOrigin("Demo sample");
     setLastSyncedAt(null);
-  }, []);
+    if (isSignedIn) syncWrite(() => accountApi.clearBusyIntervals());
+  }, [isSignedIn, syncWrite]);
+
+  const syncStatus = useMemo<CalendarSyncStatus>(
+    () => ({
+      lastSyncedAt,
+      sourceCount: visibleBusyIntervals ? new Set(visibleBusyIntervals.map((interval) => interval.sourceId).filter(Boolean)).size : 0,
+      isStale: lastSyncedAt ? Date.now() - Date.parse(lastSyncedAt) > 24 * 60 * 60 * 1000 : false,
+    }),
+    [visibleBusyIntervals, lastSyncedAt],
+  );
+
+  const availabilityByEvent = useMemo(
+    () => Object.fromEntries(displayEvents.map((event) => [event.id, getAvailability(event, visibleBusyIntervals)])),
+    [displayEvents, visibleBusyIntervals],
+  );
 
   return {
-    events,
-    busyIntervals,
-    busyOrigin,
-    savedEventIds,
-    preferences,
+    events: displayEvents,
+    busyIntervals: visibleBusyIntervals,
+    busyOrigin: accountReady ? busyOrigin : "Demo sample",
+    savedEventIds: visibleSavedIds,
+    preferences: visiblePreferences,
     syncStatus,
+    persistenceStatus,
+    accountReady,
+    isAuthenticated: Boolean(isSignedIn),
     availabilityByEvent,
     saveEvent,
     updatePreferences,
     importBusyIntervals,
     clearImportedBusyIntervals,
+    retryAccountSync: () => {
+      attemptedUserRef.current = null;
+      setRetryCount((value) => value + 1);
+    },
   };
 }
