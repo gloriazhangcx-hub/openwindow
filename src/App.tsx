@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  CalendarDays, Check, ChevronLeft, ChevronRight, ExternalLink, Plus, Star,
-  LayoutList, MapPin, Settings2, Sparkles, X, Download, Upload, Pencil, Trash2,
+  Check, ChevronLeft, ChevronRight, ExternalLink, Plus, Star,
+  MapPin, Settings2, Sparkles, X, Download, Upload, Pencil, Trash2,
   RotateCcw, SlidersHorizontal,
 } from "lucide-react";
 import { useClerk, useUser } from "@clerk/react";
@@ -20,6 +20,11 @@ import { filterEvents } from "./lib/event-filtering";
 import { sortEventsByStart, type EventSortOrder } from "./lib/event-sorting";
 import { calculateDiscoverSummary, calculateMyEventsSummary } from "./lib/dashboard";
 import {
+  getEventView,
+  INITIAL_WORKSPACE_TAB,
+  type WorkspaceTab,
+} from "./lib/workspace-navigation";
+import {
   countCalendarBusyIntervalsForDay,
   getCalendarAttendanceStatus,
   getCalendarDayBlocks,
@@ -29,6 +34,7 @@ import { shouldShowMyEventsAttendanceControl } from "./lib/event-attendance";
 import { CalendarAttendanceMarker } from "./components/CalendarAttendanceMarker";
 import { ManualEventDialog } from "./components/ManualEventDialog";
 import { DiscoverSummaryStrip, MyEventsDashboard } from "./components/CompactDashboard";
+import { PrimaryNavigation } from "./components/PrimaryNavigation";
 import {
   ATTENDANCE_STATUSES,
   ATTENDANCE_STATUS_LABELS,
@@ -119,9 +125,9 @@ function App() {
   const { user, isLoaded } = useUser();
   const { signOut } = useClerk();
   const model = useOpenWindow();
-  const [view, setView] = useState<View>(() =>
-    new URLSearchParams(window.location.search).get("view") === "calendar" ? "calendar" : "list",
-  );
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(INITIAL_WORKSPACE_TAB);
+  const view: View = getEventView(activeTab);
+  const myEventsOnly = activeTab === "my-events";
   const [calendarMode, setCalendarMode] = useState<CalendarMode>(initialCalendarMode);
   const [calendarDate, setCalendarDate] = useState(initialCalendarDate);
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
@@ -130,7 +136,6 @@ function App() {
   const [dateSortOrder, setDateSortOrder] = useState<EventSortOrder>("soonest");
   const [searchQuery, setSearchQuery] = useState("");
   const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<AttendanceStatusFilter>("all");
-  const [myEventsOnly, setMyEventsOnly] = useState(false);
   const [activeEvent, setActiveEvent] = useState<EventItem | null>(null);
   const [manualEventEditor, setManualEventEditor] = useState<{ event?: EventItem } | null>(null);
   const [preferencesOpen, setPreferencesOpen] = useState(false);
@@ -242,18 +247,6 @@ function App() {
       : model.isAuthenticated ? "Starred in your account" : "Starred on this device · Sign in to sync");
   };
 
-  const toggleMyEvents = () => {
-    const nextMyEventsOnly = !myEventsOnly;
-    if (nextMyEventsOnly && view === "calendar") {
-      const nearest = findNearestUpcomingEvent(
-        filteredEvents,
-        [...model.starredEventIds, ...model.manualEventIds],
-      );
-      if (nearest) setCalendarDate(atCalendarNoon(safeDate(nearest.start)));
-    }
-    setMyEventsOnly(nextMyEventsOnly);
-  };
-
   const saveManualEvent = async (input: ManualEventInput) => {
     if (manualEventEditor?.event) {
       await model.updateManualEvent(manualEventEditor.event.id, input);
@@ -284,13 +277,21 @@ function App() {
     setAvailabilityFilter("all");
     setSearchQuery("");
     setAttendanceStatusFilter("all");
-    setMyEventsOnly(false);
+    setActiveTab("discover");
   };
 
   const openCalendar = () => {
     setCalendarDate(atCalendarNoon(new Date()));
     setCalendarMode("week");
-    setView("calendar");
+    setActiveTab("calendar");
+  };
+
+  const selectWorkspaceTab = (tab: WorkspaceTab) => {
+    if (tab === "calendar") {
+      openCalendar();
+      return;
+    }
+    setActiveTab(tab);
   };
 
   const onImport = async (file?: File) => {
@@ -308,7 +309,7 @@ function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <button className="brand" aria-label="OpenWindow home" onClick={() => { clearFilters(); setView("list"); }}>
+        <button className="brand" aria-label="OpenWindow home" onClick={clearFilters}>
           <span className="brand-mark" aria-hidden="true" />
           <span className="brand-name">openwindow</span>
         </button>
@@ -377,10 +378,11 @@ function App() {
 
           <section className="main-panel" aria-label="Event opportunities">
             <div className="panel-toolbar">
-              <div className="view-switch" role="tablist" aria-label="Event view">
-                <button role="tab" aria-selected={view === "list"} className={view === "list" ? "selected" : ""} onClick={() => setView("list")}><LayoutList size={15} /> List</button>
-                <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "selected" : ""} onClick={openCalendar}><CalendarDays size={15} /> Calendar</button>
-              </div>
+              <PrimaryNavigation
+                activeTab={activeTab}
+                eventCount={myEventsSummary.totalEvents}
+                onSelect={selectWorkspaceTab}
+              />
               <div className="toolbar-right">
                 {view === "list" && !myEventsOnly && (
                   <label className="list-sort-control">
@@ -394,19 +396,6 @@ function App() {
                       <option value="latest">Date: Latest first</option>
                     </select>
                   </label>
-                )}
-                <button
-                  className={`my-events-toggle ${myEventsOnly ? "active" : ""}`}
-                  aria-pressed={myEventsOnly}
-                  aria-label={myEventsOnly ? "My Events selected" : "Show My Events"}
-                  onClick={toggleMyEvents}
-                >
-                  <Star size={15} fill={myEventsOnly ? "currentColor" : "none"} /> My Events <span>{model.starredEventIds.length + model.manualEventIds.length}</span>
-                </button>
-                {myEventsOnly && (
-                  <button className="text-button my-events-return" type="button" onClick={() => setMyEventsOnly(false)}>
-                    <ChevronLeft size={14} /> Full Discover
-                  </button>
                 )}
                 {myEventsOnly && (
                   <label className="attendance-filter">
