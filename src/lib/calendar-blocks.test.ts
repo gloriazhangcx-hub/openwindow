@@ -116,6 +116,60 @@ test("calendar event accessible labels include attendance status without replaci
   );
 });
 
+test("attendance statuses stay visible for starred and manual events in both Calendar scopes", () => {
+  const interested = eventAt("interested", 17);
+  const planning = eventAt("planning", 18);
+  const registered = eventAt("registered", 19, { source: "Manual" });
+  const unstarred = eventAt("unstarred", 20);
+  const events = [interested, planning, registered, unstarred];
+  const attendanceByEventId = {
+    interested: "interested",
+    planning: "planning_to_attend",
+    registered: "registered",
+  } as const;
+  const options = {
+    preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
+    availabilityByEvent: {},
+    attendanceByEventId,
+    starredEventIds: ["interested", "planning"],
+    selectedTopics: [],
+    selectedFormats: [],
+    availabilityFilter: "all" as const,
+    searchQuery: "",
+    now,
+  };
+  const allEvents = filterEvents(events, {
+    ...options,
+    myEventsOnly: false,
+    attendanceStatusFilter: "all",
+  });
+  const myEvents = filterEvents(events, {
+    ...options,
+    myEventsOnly: true,
+    attendanceStatusFilter: "all",
+  });
+  const calendarStatuses = (items: EventItem[]) => getCalendarDayBlocks(
+    new Date(2027, 0, 3, 12),
+    items,
+    null,
+    {},
+    options.starredEventIds,
+    attendanceByEventId,
+  ).flatMap((block) => block.kind === "event" ? [[block.event.id, block.attendanceStatus]] : []);
+
+  assert.deepEqual(calendarStatuses(allEvents), [
+    ["interested", "interested"],
+    ["planning", "planning_to_attend"],
+    ["registered", "registered"],
+    ["unstarred", null],
+  ]);
+  assert.deepEqual(calendarStatuses(myEvents), [
+    ["interested", "interested"],
+    ["planning", "planning_to_attend"],
+    ["registered", "registered"],
+  ]);
+});
+
 test("overnight personal events appear as clipped segments on both calendar dates", () => {
   const overnight = eventAt("overnight", 23, {
     start: "2027-01-04T07:00:00.000Z",

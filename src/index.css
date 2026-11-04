@@ -79,6 +79,8 @@ h1,h2,h3,p { margin-top:0; }
 .toolbar-right { display:flex;align-items:center;gap:10px; }
 .list-sort-control { display:flex;align-items:center;gap:5px;color:#80798d;font-size:10px;font-weight:600;white-space:nowrap; }
 .list-sort-control select { max-width:178px;height:30px;border:1px solid #e4deeb;background:#fbf9fd;border-radius:7px;padding:0 8px;color:#4b3a74;font-size:10px; }
+.calendar-scope-control { display:flex;align-items:center;gap:5px;color:#80798d;font-size:10px;font-weight:600;white-space:nowrap; }
+.calendar-scope-control select { max-width:150px;height:30px;border:1px solid #e4deeb;background:#fbf9fd;border-radius:7px;padding:0 8px;color:#4b3a74;font-size:10px; }
 .attendance-filter { display:flex;align-items:center;gap:5px;color:#80798d;font-size:10px;font-weight:600;white-space:nowrap; }
 .attendance-filter select { max-width:160px;height:30px;border:1px solid #e4deeb;background:#fbf9fd;border-radius:7px;padding:0 8px;color:#4b3a74;font-size:10px; }
 .count-label { font-size:11px;color:#939c94;white-space:nowrap; }
@@ -281,6 +283,8 @@ h1,h2,h3,p { margin-top:0; }
   .toolbar-right {width:100%;gap:7px;flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:wrap}
   .list-sort-control {font-size:9px}
   .list-sort-control select {max-width:150px;font-size:9px;padding:0 6px}
+   .calendar-scope-control {font-size:9px}
+   .calendar-scope-control select {max-width:145px;font-size:9px;padding:0 6px}
  .count-label {font-size:9px}
   .discover-summary {gap:8px;padding:8px 12px;flex-wrap:wrap}
   .discover-summary-stat {gap:4px;padding-right:8px;font-size:9px}
