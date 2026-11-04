@@ -18,6 +18,7 @@ class MemoryStore implements AccountStore {
       preferences: null,
       savedEventIds: [],
       savedEvents: [],
+      starredEvents: [],
       manualEvents: [],
       attendanceByEventId: {},
       busyIntervals: [],
@@ -58,6 +59,14 @@ class MemoryStore implements AccountStore {
       row.savedEvents = row.savedEvents.filter((item) => item.id !== event.id);
       delete row.attendanceByEventId[event.id];
     }
+  }
+
+  async setStarredEvent(userId: string, event: EventItem, starred: boolean) {
+    const row = this.row(userId);
+    if (starred && !row.starredEvents.some((item) => item.id === event.id)) {
+      row.starredEvents.push(event);
+    }
+    if (!starred) row.starredEvents = row.starredEvents.filter((item) => item.id !== event.id);
   }
 
   async updateAttendanceStatus(userId: string, eventId: string, status: AttendanceStatus) {
@@ -192,6 +201,64 @@ test("request-supplied user IDs cannot redirect private writes to another accoun
     const aliceData = await alice.json() as AccountData;
     assert.deepEqual(bobData.preferences?.cities, ["Oakland"]);
     assert.equal(aliceData.preferences, null);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
+test("bookmark and Star routes stay separate and isolated across authenticated users", async () => {
+  const store = new MemoryStore();
+  const app = express();
+  app.use("/api/account", createAccountRouter(
+    store,
+    (request) => request.header("x-test-session") ?? null,
+  ));
+  const server = createServer(app);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}/api/account`;
+  const event = demoEvents[0];
+  const data = async (user: string) =>
+    (await fetch(`${base}/data`, { headers: { "x-test-session": user } })).json() as Promise<AccountData>;
+  const write = (path: string, user: string, body: unknown) =>
+    fetch(`${base}${path}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-test-session": user },
+      body: JSON.stringify(body),
+    });
+
+  try {
+    assert.equal((await write("/saved-events", "alice", { event, saved: true })).status, 200);
+    assert.deepEqual((await data("alice")).savedEventIds, [event.id]);
+    assert.deepEqual((await data("alice")).starredEvents, []);
+    assert.deepEqual((await data("bob")).savedEventIds, []);
+
+    assert.equal((await write("/stars", "alice", { event, starred: true })).status, 200);
+    const aliceAfterStar = await data("alice");
+    assert.deepEqual(aliceAfterStar.savedEventIds, [event.id]);
+    assert.deepEqual(aliceAfterStar.starredEvents.map((item) => item.id), [event.id]);
+    assert.deepEqual((await data("bob")).starredEvents, []);
+
+    assert.equal((await write("/saved-events", "alice", { event, saved: false })).status, 200);
+    const aliceAfterUnbookmark = await data("alice");
+    assert.deepEqual(aliceAfterUnbookmark.savedEventIds, []);
+    assert.deepEqual(aliceAfterUnbookmark.starredEvents.map((item) => item.id), [event.id]);
+    assert.deepEqual((await data("bob")).savedEventIds, []);
+    assert.deepEqual((await data("bob")).starredEvents, []);
+
+    assert.equal((await write("/stars", "alice", { event, starred: false })).status, 200);
+    assert.deepEqual((await data("alice")).starredEvents, []);
+    const spoofedStar = await write("/stars", "alice", { event, starred: true, userId: "bob" });
+    assert.equal(spoofedStar.status, 400);
+    const unauthenticatedStar = await fetch(`${base}/stars`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ event, starred: true }),
+    });
+    assert.equal(unauthenticatedStar.status, 401);
   } finally {
     server.close();
     await once(server, "close");

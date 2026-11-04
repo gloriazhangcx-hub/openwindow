@@ -162,6 +162,24 @@ export function createAccountRouter(store: AccountStore, resolveUserId: UserIdRe
     }
   });
 
+  router.put("/stars", async (request, response) => {
+    if (
+      !record(request.body) ||
+      Object.keys(request.body).some((key) => !["event", "starred"].includes(key)) ||
+      typeof request.body.starred !== "boolean"
+    ) {
+      return response.status(400).json({ error: "Expected an event snapshot and starred boolean." });
+    }
+    const event = parseEventItem(request.body.event);
+    if (!event) return response.status(400).json({ error: "Event snapshot is invalid." });
+    try {
+      await store.setStarredEvent(accountId(response), event, request.body.starred);
+      return response.json({ starred: request.body.starred });
+    } catch (error) {
+      return sendFailure(response, error);
+    }
+  });
+
   router.put("/saved-events/attendance", async (request, response) => {
     if (
       !record(request.body) ||

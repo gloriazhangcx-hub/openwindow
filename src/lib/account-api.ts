@@ -5,6 +5,7 @@ export type AccountData = {
   preferences: Preferences | null;
   savedEventIds: string[];
   savedEvents: EventItem[];
+  starredEvents: EventItem[];
   manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
   busyIntervals: BusyInterval[];
@@ -35,6 +36,11 @@ export const accountApi = {
     request("/saved-events", {
       method: "PUT",
       body: JSON.stringify({ event, saved }),
+    }),
+  setStarredEvent: (event: EventItem, starred: boolean) =>
+    request("/stars", {
+      method: "PUT",
+      body: JSON.stringify({ event, starred }),
     }),
   updateAttendanceStatus: (eventId: string, status: AttendanceStatus) =>
     request("/saved-events/attendance", {

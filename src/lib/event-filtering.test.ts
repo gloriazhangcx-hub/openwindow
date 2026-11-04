@@ -218,3 +218,48 @@ test("attendance status filters do not change Full Discover results", () => {
 
   assert.deepEqual(result.map((event) => event.id), ["interested", "registered"]);
 });
+
+test("Starred filters show starred events independently of bookmarks and discovery defaults", () => {
+  const starredOnly = eventAt("starred-only", 25, { city: "New York" });
+  const savedButNotStarred = eventAt("saved-not-starred", 1);
+  const options: EventFilterOptions = {
+    preferences: { ...DEFAULT_PREFERENCES, cities: ["Berkeley"], dateHorizonDays: 14 },
+    availabilityByEvent: {},
+    attendanceByEventId: {},
+    savedEventIds: ["saved-not-starred"],
+    starredEventIds: ["starred-only"],
+    selectedTopics: [],
+    selectedFormats: [],
+    availabilityFilter: "all",
+    attendanceStatusFilter: "registered",
+    savedOnly: true,
+    starredOnly: true,
+    now,
+  };
+
+  assert.deepEqual(
+    filterEvents([savedButNotStarred, starredOnly], options).map((event) => event.id),
+    ["starred-only"],
+  );
+  assert.deepEqual(
+    filterEvents([starredOnly], { ...options, starredOnly: false, savedEventIds: [] }),
+    [],
+  );
+});
+
+test("saved events are not hidden by the discovery city or date-horizon defaults", () => {
+  const saved = eventAt("saved-outside-defaults", 25, { city: "New York" });
+  const options: EventFilterOptions = {
+    preferences: { ...DEFAULT_PREFERENCES, cities: ["Berkeley"], dateHorizonDays: 14 },
+    availabilityByEvent: {},
+    attendanceByEventId: {},
+    savedEventIds: [saved.id],
+    selectedTopics: [],
+    selectedFormats: [],
+    availabilityFilter: "all",
+    attendanceStatusFilter: "all",
+    savedOnly: true,
+    now,
+  };
+  assert.deepEqual(filterEvents([saved], options).map((event) => event.id), [saved.id]);
+});

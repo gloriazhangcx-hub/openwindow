@@ -117,7 +117,10 @@ export interface OpenWindowModel {
   busyIntervals: BusyInterval[] | null;
   busyOrigin: BusyOrigin;
   savedEventIds: string[];
+  starredEventIds: string[];
+  starredEvents: EventItem[];
   manualEventIds: string[];
+  manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
   preferences: Preferences;
   syncStatus: CalendarSyncStatus;
@@ -126,6 +129,7 @@ export interface OpenWindowModel {
   isAuthenticated: boolean;
   availabilityByEvent: Record<string, ReturnType<typeof getAvailability>>;
   saveEvent: (event: EventItem) => void;
+  setStarredEvent: (event: EventItem, starred: boolean) => boolean;
   updateAttendanceStatus: (eventId: string, status: AttendanceStatus) => void;
   createManualEvent: (input: ManualEventInput) => Promise<EventItem>;
   updateManualEvent: (eventId: string, input: ManualEventInput) => Promise<EventItem>;
@@ -161,6 +165,7 @@ export function useOpenWindow(): OpenWindowModel {
   const [savedEventIds, setSavedEventIds] = useState<string[]>(() =>
     initialLocalAllowed ? readStored<string[]>(STORAGE_KEYS.saved, []) : [],
   );
+  const [starredEventSnapshots, setStarredEventSnapshots] = useState<EventItem[]>([]);
   const [attendanceByEventId, setAttendanceByEventId] = useState<Record<string, AttendanceStatus>>({});
   const [preferences, setPreferences] = useState<Preferences>(
     initialLocalAllowed ? readPreferences() : DEFAULT_PREFERENCES,
@@ -183,6 +188,7 @@ export function useOpenWindow(): OpenWindowModel {
       attemptedUserRef.current = null;
       setLoadedUserId(null);
       setSavedEventSnapshots([]);
+      setStarredEventSnapshots([]);
       setManualEventSnapshots([]);
       setAttendanceByEventId({});
       setPersistenceStatus("local");
@@ -238,6 +244,7 @@ export function useOpenWindow(): OpenWindowModel {
       if (cancelled) return;
       setSavedEventIds(account.savedEventIds);
       setSavedEventSnapshots(account.savedEvents);
+      setStarredEventSnapshots(account.starredEvents);
       setManualEventSnapshots(account.manualEvents);
       setAttendanceByEventId(account.attendanceByEventId);
       setPreferences(account.preferences ?? (canUseThisUserLocalState ? readPreferences() : DEFAULT_PREFERENCES));
@@ -272,6 +279,7 @@ export function useOpenWindow(): OpenWindowModel {
   const visiblePreferences = accountReady ? preferences : DEFAULT_PREFERENCES;
   const visibleBusyIntervals = accountReady ? busyIntervals : demoBusyIntervals;
   const visibleSavedSnapshots = accountReady ? savedEventSnapshots : [];
+  const visibleStarredSnapshots = accountReady ? starredEventSnapshots : [];
   const displayEvents = useMemo(() => {
     const byId = new Map(events.map((event) => [event.id, event]));
     visibleSavedSnapshots.forEach((event) => {
@@ -339,6 +347,15 @@ export function useOpenWindow(): OpenWindowModel {
     writeLegacyValue(STORAGE_KEYS.saved, JSON.stringify(nextIds), isSignedIn, userId ?? null);
     if (isSignedIn) syncWrite(() => accountApi.setSavedEvent(event, nextSaved));
   }, [visibleSavedIds, isSignedIn, userId, syncWrite]);
+
+  const setStarredEvent = useCallback((event: EventItem, starred: boolean) => {
+    if (event.source === "Manual" || !isSignedIn || !accountReady) return false;
+    setStarredEventSnapshots((previous) => starred
+      ? [...previous.filter((item) => item.id !== event.id), event]
+      : previous.filter((item) => item.id !== event.id));
+    syncWrite(() => accountApi.setStarredEvent(event, starred));
+    return true;
+  }, [isSignedIn, accountReady, syncWrite]);
 
   const updateAttendanceStatus = useCallback((eventId: string, status: AttendanceStatus) => {
     const isManual = visibleManualIds.includes(eventId);
@@ -438,8 +455,15 @@ export function useOpenWindow(): OpenWindowModel {
   );
 
   const availabilityByEvent = useMemo(
-    () => Object.fromEntries(displayEvents.map((event) => [event.id, getAvailability(event, visibleBusyIntervals)])),
-    [displayEvents, visibleBusyIntervals],
+    () => {
+      const allEvents = new Map(displayEvents.map((event) => [event.id, event]));
+      visibleStarredSnapshots.forEach((event) => allEvents.set(event.id, event));
+      return Object.fromEntries([...allEvents.values()].map((event) => [
+        event.id,
+        getAvailability(event, visibleBusyIntervals),
+      ]));
+    },
+    [displayEvents, visibleStarredSnapshots, visibleBusyIntervals],
   );
 
   return {
@@ -447,7 +471,10 @@ export function useOpenWindow(): OpenWindowModel {
     busyIntervals: visibleBusyIntervals,
     busyOrigin: accountReady ? busyOrigin : "Demo sample",
     savedEventIds: visibleSavedIds,
+    starredEventIds: visibleStarredSnapshots.map((event) => event.id),
+    starredEvents: visibleStarredSnapshots,
     manualEventIds: visibleManualIds,
+    manualEvents: visibleManualEvents,
     attendanceByEventId: visibleAttendanceByEventId,
     preferences: visiblePreferences,
     syncStatus,
@@ -456,6 +483,7 @@ export function useOpenWindow(): OpenWindowModel {
     isAuthenticated: Boolean(isSignedIn),
     availabilityByEvent,
     saveEvent,
+    setStarredEvent,
     updateAttendanceStatus,
     createManualEvent,
     updateManualEvent,

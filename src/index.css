@@ -102,6 +102,10 @@ h1,h2,h3,p { margin-top:0; }
 .attendance-sign-in:hover { text-decoration:underline; }
 .attendance-status-note { color:#929c94;font-size:10px; }
 .event-actions { display:flex;align-items:center;gap:8px; }
+.my-events-tabs { display:flex;gap:4px;width:max-content;margin:0 18px 10px;padding:4px;border:1px solid #e5dfee;border-radius:10px;background:#f7f4fa; }
+.my-events-tabs button { display:inline-flex;align-items:center;gap:6px;border:0;border-radius:7px;padding:7px 10px;background:transparent;color:#766f84;font:600 10px "DM Sans",sans-serif;cursor:pointer; }
+.my-events-tabs button.selected { background:#fffefa;color:#514080;box-shadow:0 1px 3px #392b6017; }
+.my-events-tabs button span { min-width:16px;padding:1px 4px;border-radius:8px;background:#eee9f6;color:#594580;text-align:center;font-size:9px; }
 .availability { font-size:10px;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;color:#578069; }
 .availability:before { content:"";width:6px;height:6px;border-radius:50%;background:currentColor; }
 .availability.conflict { color:#c16b58; }
@@ -109,6 +113,9 @@ h1,h2,h3,p { margin-top:0; }
 .save-btn { width:32px;height:32px;border:1px solid transparent;background:transparent;border-radius:9px;display:grid;place-items:center;color:#9aa49c;cursor:pointer;transition:.2s; }
 .save-btn:hover { background:#f7eae4;color:#c16b58; }
 .save-btn.saved { color:#c16b58;background:#f8e8e2; }
+.star-btn { width:32px;height:32px;border:1px solid transparent;background:transparent;border-radius:9px;display:grid;place-items:center;color:#b69a37;cursor:pointer;transition:.2s; }
+.star-btn:hover { background:#faf1cf;color:#8d7118; }
+.star-btn.starred { color:#8d7118;background:#faf1cf; }
 .details-btn { border:1px solid #e0d8ed;background:#fbf9fd;border-radius:8px;padding:7px 10px;font-size:10px;font-weight:700;color:#514080;cursor:pointer;white-space:nowrap; }
 .details-btn:hover { background:#f1ecf8;border-color:#c8badd; }
 .list-luma-link { display:inline-flex;align-items:center;gap:4px;color:#514080;text-decoration:none;font-size:10px;font-weight:700;white-space:nowrap; }

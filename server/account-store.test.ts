@@ -79,6 +79,32 @@ test("PostgreSQL account storage is isolated and local migration is idempotent",
     assert.equal(aliceAfterStatus.attendanceByEventId[event.id], "planning_to_attend");
     assert.equal(bobAfterCrossAccountStatusAttempt.attendanceByEventId[demoEvents[1].id], "interested");
 
+    const independentStarEvent = demoEvents[4];
+    await store.setStarredEvent(aliceId, independentStarEvent, true);
+    const reloadedStore = createAccountStore(db);
+    const aliceStarOnly = await reloadedStore.readAccount(aliceId);
+    assert.equal(aliceStarOnly.savedEventIds.includes(independentStarEvent.id), false);
+    assert.deepEqual(aliceStarOnly.starredEvents.map((item) => item.id), [independentStarEvent.id]);
+
+    await store.setSavedEvent(aliceId, independentStarEvent, true);
+    const aliceWithStar = await reloadedStore.readAccount(aliceId);
+    const bobWithoutStar = await reloadedStore.readAccount(bobId);
+    assert.ok(aliceWithStar.savedEventIds.includes(independentStarEvent.id));
+    assert.deepEqual(aliceWithStar.starredEvents.map((item) => item.id), [independentStarEvent.id]);
+    assert.deepEqual(bobWithoutStar.starredEvents, []);
+
+    await store.setSavedEvent(aliceId, independentStarEvent, false);
+    const aliceAfterUnbookmark = await reloadedStore.readAccount(aliceId);
+    assert.equal(aliceAfterUnbookmark.savedEventIds.includes(independentStarEvent.id), false);
+    assert.deepEqual(aliceAfterUnbookmark.starredEvents.map((item) => item.id), [independentStarEvent.id]);
+    await store.setStarredEvent(bobId, independentStarEvent, false);
+    assert.deepEqual((await reloadedStore.readAccount(aliceId)).starredEvents.map((item) => item.id), [independentStarEvent.id]);
+    assert.deepEqual((await reloadedStore.readAccount(bobId)).starredEvents, []);
+    await store.setStarredEvent(aliceId, independentStarEvent, false);
+    const aliceAfterUnstar = await reloadedStore.readAccount(aliceId);
+    assert.equal(aliceAfterUnstar.savedEventIds.includes(independentStarEvent.id), false);
+    assert.deepEqual(aliceAfterUnstar.starredEvents, []);
+
     const manualInput: ManualEventInput = {
       title: "Personal Community Meetup",
       description: "An event added by the account owner.",
@@ -189,6 +215,7 @@ test("PostgreSQL account storage is isolated and local migration is idempotent",
     await db.insert(stars).values({ userId: aliceUser[0].id, eventId: starOnlyRow.id });
     const aliceAfterStar = await store.readAccount(aliceId);
     assert.deepEqual(aliceAfterStar.savedEventIds, [event.id]);
+    assert.ok(aliceAfterStar.starredEvents.some((item) => item.id === `star-only-${starOnlyEvent.id}`));
 
     const rerunClient = await getPool().connect();
     try {

@@ -9,6 +9,7 @@ import {
   manualEvents,
   migrationSnapshots,
   savedEvents,
+  stars,
   userPreferences,
   users,
 } from "./db/schema";
@@ -29,6 +30,7 @@ export type AccountData = {
   preferences: Preferences | null;
   savedEventIds: string[];
   savedEvents: EventItem[];
+  starredEvents: EventItem[];
   manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
   busyIntervals: BusyInterval[];
@@ -49,6 +51,7 @@ export interface AccountStore {
     eventSnapshots: EventItem[],
   ): Promise<MigrationResult>;
   setSavedEvent(clerkUserId: string, event: EventItem, saved: boolean): Promise<void>;
+  setStarredEvent(clerkUserId: string, event: EventItem, starred: boolean): Promise<void>;
   updateAttendanceStatus(
     clerkUserId: string,
     eventId: string,
@@ -187,7 +190,25 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         .innerJoin(events, eq(savedEvents.eventId, events.id))
         .where(eq(savedEvents.userId, userId))
         .orderBy(asc(events.startsAt));
-      const ids = savedRows.map((row) => row.id);
+      const starredRows = await database
+        .select({
+          id: events.id,
+          legacyEventId: events.legacyEventId,
+          title: events.title,
+          description: events.description,
+          startsAt: events.startsAt,
+          endsAt: events.endsAt,
+          timeZone: events.timeZone,
+          city: events.city,
+          venue: events.venue,
+          source: events.source,
+          lumaUrl: events.lumaUrl,
+        })
+        .from(stars)
+        .innerJoin(events, eq(stars.eventId, events.id))
+        .where(and(eq(stars.userId, userId), eq(events.userId, userId)))
+        .orderBy(asc(events.startsAt));
+      const ids = [...new Set([...savedRows, ...starredRows].map((row) => row.id))];
       const topicRows = ids.length
         ? await database.select().from(eventTopics).where(inArray(eventTopics.eventId, ids))
         : [];
@@ -198,20 +219,32 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
       topicRows.forEach(({ eventId, topic }) => topicsByEvent.set(eventId, [...(topicsByEvent.get(eventId) ?? []), topic]));
       const formatsByEvent = new Map<string, string[]>();
       formatRows.forEach(({ eventId, format }) => formatsByEvent.set(eventId, [...(formatsByEvent.get(eventId) ?? []), format]));
-      const savedEventItems: EventItem[] = savedRows.flatMap((row) => row.legacyEventId ? [{
-        id: row.legacyEventId,
-        title: row.title,
-        description: row.description,
-        start: row.startsAt.toISOString(),
-        end: row.endsAt.toISOString(),
-        timeZone: row.timeZone,
-        city: row.city,
-        venue: row.venue,
-        topics: (topicsByEvent.get(row.id) ?? []) as EventItem["topics"],
-        formats: (formatsByEvent.get(row.id) ?? []) as EventItem["formats"],
-        source: row.source === "Luma" ? "Luma" : "Demo",
-        lumaUrl: row.lumaUrl,
-      }] : []);
+      const itemsById = new Map<string, EventItem>();
+      for (const row of [...savedRows, ...starredRows]) {
+        if (!row.legacyEventId) continue;
+        itemsById.set(row.id, {
+          id: row.legacyEventId,
+          title: row.title,
+          description: row.description,
+          start: row.startsAt.toISOString(),
+          end: row.endsAt.toISOString(),
+          timeZone: row.timeZone,
+          city: row.city,
+          venue: row.venue,
+          topics: (topicsByEvent.get(row.id) ?? []) as EventItem["topics"],
+          formats: (formatsByEvent.get(row.id) ?? []) as EventItem["formats"],
+          source: row.source === "Luma" ? "Luma" : "Demo",
+          lumaUrl: row.lumaUrl,
+        });
+      }
+      const savedEventItems = savedRows.flatMap((row) => {
+        const event = itemsById.get(row.id);
+        return event ? [event] : [];
+      });
+      const starredEventItems = starredRows.flatMap((row) => {
+        const event = itemsById.get(row.id);
+        return event ? [event] : [];
+      });
       const manualRows = await database
         .select()
         .from(manualEvents)
@@ -238,6 +271,7 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         preferences: preferenceRow?.preferences ?? null,
         savedEventIds: savedEventItems.map((event) => event.id),
         savedEvents: savedEventItems,
+        starredEvents: starredEventItems,
         manualEvents: manualEventItems,
         attendanceByEventId: Object.fromEntries(
           [
@@ -319,6 +353,34 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
             await transaction.delete(savedEvents)
               .where(and(eq(savedEvents.userId, userId), eq(savedEvents.eventId, existing.id)));
           }
+        }
+      });
+    },
+
+    async setStarredEvent(clerkUserId, event, starred) {
+      const database = resolveDatabase();
+      const userId = await ensureUser(database, clerkUserId);
+      await database.transaction(async (transaction) => {
+        if (starred) {
+          const eventId = await insertEvent(transaction, userId, event);
+          await transaction.insert(stars).values({ userId, eventId }).onConflictDoNothing();
+          return;
+        }
+
+        const [existing] = await transaction.select({ id: events.id })
+          .from(events)
+          .where(and(eq(events.userId, userId), eq(events.legacyEventId, event.id)))
+          .limit(1);
+        if (!existing) return;
+        await transaction.delete(stars)
+          .where(and(eq(stars.userId, userId), eq(stars.eventId, existing.id)));
+        const [saved] = await transaction.select({ eventId: savedEvents.eventId })
+          .from(savedEvents)
+          .where(and(eq(savedEvents.userId, userId), eq(savedEvents.eventId, existing.id)))
+          .limit(1);
+        if (!saved) {
+          await transaction.delete(events)
+            .where(and(eq(events.id, existing.id), eq(events.userId, userId)));
         }
       });
     },
