@@ -69,16 +69,28 @@ Keep the original **Discover List ↔ Calendar Overlay** navigation and shared m
 
 **Cut first if needed:** live Luma retrieval, automated Apple Calendar Shortcut, travel-time conflicts, AI ranking, extra visual polish. **Do not cut:** accounts and isolation, related database tables, CRUD, validation, stars, search/filter plus sort, dashboard chart/stats, two required tests and red/green evidence, five real records, PR workflow, or reflection evidence.
 
-## 8. Plan vs. Reality — complete at the end
+## 8. Plan vs. Reality
 
-Preserve sections 1–7 as the formal plan; fill this table with actual implementation status and supporting PRs, including the gap between the October Word plan, prototype work, and this later course-format plan.
+Sections 1–7 preserve the course plan. This later course-format `PLAN.md` followed the original October Product Planning Document and an earlier UI prototype; it was not the repository's first development artifact.
 
-| Planned feature | Shipped / Changed / Cut | Done / Backlogged | What changed and why; evidence |
+### Verified GitHub history
+
+As of November 4, 2026, GitHub `main` contains 14 merged PRs: prototype PRs **#2, #4, #6** and course-development PRs **#10, #12, #14, #16, #18, #20, #22, #24, #26, #28, #30**. PR #8 is still a separate draft Luma PR and is not part of `main`.
+
+### Planned work compared with the shipped app
+
+| Planned feature or requirement | Shipped / Changed / Cut | Status | What changed and why; evidence |
 |---|---|---|---|
-| Accounts, database, isolation | Shipped | Done | PR #12 added Clerk authentication, PostgreSQL/Drizzle persistence, server-side ownership checks, and local-storage migration. The user manually verified sign-in, save, refresh persistence, sign-out, and account isolation. |
-| Event CRUD and validation | TBD | TBD | TBD |
-| Stars and Starred view | TBD | TBD | TBD |
-| Search, multi-label filters, sort | TBD | TBD | TBD |
-| Dashboard | TBD | TBD | TBD |
-| Calendar overlay, conflict detection, ICS | TBD | TBD | TBD |
-| Luma and Apple Calendar integrations | TBD | TBD | TBD |
+| Accounts, database, and isolation | Shipped | Done | PR #12 added Replit-managed Clerk, PostgreSQL through Drizzle/`pg`, server-verified identity, account-scoped reads/writes, and a preservation-first localStorage migration. Server and PostgreSQL tests cover ownership; the user also manually tested sign-in, refresh persistence, sign-out, and account isolation. |
+| Relational data and multiple labels | Shipped | Done | PR #12 established the per-user PostgreSQL account model; later PR #20 clarified the active Stars relationship. `event_topics` and `event_formats` use composite keys so one event can have multiple labels; manual events keep their label arrays in JSONB. See [`docs/schema.md`](docs/schema.md). |
+| Event CRUD and validation | Shipped | Done | PR #18 added create, list, edit, and delete for personal events, plus input validation and ownership checks. Manual events remain separate from starred Discover events. |
+| Stars and My Events | Shipped; user-facing scope simplified | Done | PR #20 made Stars the single action/relationship for discovered events in My Events. The app has no duplicate Bookmark/Star action or separate Saved page. Manual events remain visible in My Events without a Star. The legacy `saved_events` table remains for compatibility and migration, not as a second current UI collection. |
+| Search, filters, and date sorting | Shipped | Done | PR #16 added case-insensitive title/description search; PR #22 added soonest/latest sorting. Topic, Format, availability, and search combine without replacing other selections. Calendar scope filters suggestions while leaving personal busy intervals and conflict calculations intact. |
+| Dashboard | Shipped; metric definition clarified | Done | PR #24 added compact statistics and My Events summaries; PR #28 added persisted-record dashboard coverage and RED/GREEN evidence. Discover totals use the current search/filter/horizon; only detected overlaps count as Conflicts, so `Total = Conflicts + No Conflicts`. Unknown data is counted as No Conflicts for this summary only; that does not guarantee availability. |
+| Calendar overlay, conflicts, and explicit export | Shipped; Calendar scope expanded | Done | PR #2 introduced Day/Week/Month views; PR #14 added attendance status markers; PR #30 added **All Events** (default) and **My Events Only** after Stranger Test feedback that the full calendar felt crowded. Existing conflict colors, busy intervals, navigation, and `.ics` download remain. PR #26 added the validated event-details Luma-link behavior. |
+| Required data-isolation and dashboard tests | Shipped | Done | PR #28 added server-level cross-account testing and a development-PostgreSQL My Events count test. The dashboard test uses two starred records, one manual record, and an unstarred candidate, then asserts a total of three; this is a narrower scenario than the original five-saved/two-star plan, but verifies the displayed My Events count comes from persisted account records. The four archived RED/GREEN images and commands are in [`docs/test-evidence/`](docs/test-evidence/README.md). |
+| Live Luma event search | Changed / deferred | Backlogged | The UI keeps a mock event provider and a disabled Luma source until live authenticated event retrieval and its response data are verified. The ten current sample listings are fictional; demo Luma links are not event-registration URLs. No live Luma events are claimed. |
+| Apple Calendar integration | Cut to a limited import prototype | Backlogged | Users can import busy-only JSON into the conflict view; signed-in intervals are stored in their account. The optional token-protected Shortcut endpoint is a separate in-memory prototype and does not update the browser conflict view. Direct Apple Calendar read/write remains out of scope; `.ics` export is explicit. |
+| Five genuine user-owned event records | Not verifiable from repository evidence | Manual completion required | The public fixture set is fictional, and live Luma retrieval is disabled. Production account data was not inspected for this documentation task. Confirm that at least five genuine, relevant events have been added to the user's own account before submission. |
+| Stranger Test improvement | Shipped in part | Done for the selected suggestion | The user reported completing a real Stranger Test. Its calendar-crowding suggestion became PR #30's My Events Only option. The other suggestions—external map links and step-by-step onboarding—were not part of the approved change and remain deferred. |
+| Deployment | Shipped | Done | The existing Replit deployment at [open-window.replit.app](https://open-window.replit.app) was republished and verified. The production page loads, the served client contains both Calendar scope labels, and the published snapshot has no app-source, package, or schema difference from GitHub `main`. |

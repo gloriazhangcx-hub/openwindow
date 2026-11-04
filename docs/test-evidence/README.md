@@ -43,12 +43,21 @@ The RED run temporarily changed the summary to include unstarred Demo events. Th
 
 ## Screenshots
 
-The images are browser captures of the exact targeted test-run output. The RED and GREEN commands are the same for each test; only the temporary bug state differed.
+The four archived images show the named test, its targeted command, and the RED failure or GREEN pass output. The same command was used for each RED/GREEN pair; only the temporary regression state differed. The temporary regressions are not present in the current code.
 
-- `data-isolation-red.jpg`
-- `data-isolation-green.jpg`
-- `dashboard-red.jpg`
-- `dashboard-green.jpg`
+### Data isolation
+
+![Data isolation RED run: query-string identity regression fails the ownership assertion](data-isolation-red.jpg)
+
+![Data isolation GREEN run: User B receives only User B's event](data-isolation-green.jpg)
+
+### Dashboard calculation
+
+![Dashboard RED run: unstarred candidate is incorrectly counted](dashboard-red.jpg)
+
+![Dashboard GREEN run: persisted My Events count is three](dashboard-green.jpg)
+
+The archived GREEN commands can be rerun with the exact commands above. Current automated tests continue to cover these server-side behaviors; the intentionally failing RED state is historical evidence, not a current test mode.
 
 ## Full verification
 
