@@ -1,97 +1,67 @@
 # OpenWindow
 
-OpenWindow helps you discover nearby events alongside your existing schedule. Conflicting events remain visible, and the app does not rank opportunities or add them to a calendar automatically.
+OpenWindow helps people discover events alongside their existing schedules. It keeps conflicts visible, supports a personal event collection, and never adds a suggested event to a calendar automatically.
+
+**Live app:** [https://open-window.replit.app](https://open-window.replit.app)
+
+## Current features
+
+- **Discover:** case-insensitive title/description search; multi-select Topic and Format filters; availability filtering; and date sorting from soonest or latest.
+- **My Events:** one Star action for discovered events, user-created personal events, attendance statuses (Interested, Planning to Attend, Registered), and compact collection summaries.
+- **Calendar:** Day, Week, and Month views. **All Events** is the default and includes Discover events plus the user's manual events. **My Events Only** shows starred Discover events and manual events. Attendance status and conflict information remain tied to the same account data in every view.
+- **Conflict detection:** compares event intervals with known busy intervals using `event.start < busy.end && event.end > busy.start`. Events with detected overlaps are marked Conflict; missing information can remain Unknown. Dashboard “No Conflicts” means no conflict was detected in the currently known calendar data, not guaranteed real-world availability.
+- **Event details:** explicit `.ics` download and a Luma link only when a valid stored URL is available. Demo fixtures link to the Luma homepage, not to a specific event registration page.
+- **Preferences and calendar context:** import a JSON file containing `busy` or `busyIntervals` (or a bare array) of ISO-8601 intervals. Keep only start/end, optional time zone, and optional anonymous source ID; do not include event names, attendees, or notes.
+
+## Data and integration status
+
+All ten current Discover fixtures are fictional demo events. The active event provider is the mock source; the Luma live-search adapter is disabled, so the app does not claim these listings are real Luma results. The app can display a valid event-specific Luma URL when one is present in stored event data, but no live Luma event retrieval is currently verified.
+
+Sign-up, sign-in, and sign-out use Replit-managed Clerk. Private account operations are served by the Express/TypeScript API and persisted in PostgreSQL through Drizzle and `pg`. The server verifies Clerk sessions and scopes private records to the authenticated account. Signed-out demo discovery remains available; signed-out Star behavior is local to that browser. Legacy browser values are snapshotted and migrated without automatically deleting the original localStorage values.
+
+The Drizzle schema and relationship notes are in [`docs/schema.md`](docs/schema.md). The test requirements and RED/GREEN evidence are documented in [`docs/test-evidence/README.md`](docs/test-evidence/README.md).
+
+### Calendar import and Shortcut prototype
+
+The Preferences JSON import is the supported way to provide busy intervals to the conflict view. When signed in, the intervals are also stored under that user's account. No direct Apple Calendar read or write is performed.
+
+There is also an optional token-protected `POST /api/calendar/busy` endpoint for an iOS Shortcut. Set `CALENDAR_SYNC_TOKEN` as a Replit Secret to enable it; never commit the token or put it in frontend code. This separate prototype retains the latest upload in server memory and does not feed the browser's conflict view. `GET /api/calendar/status` exposes only the last sync time and interval count; `GET /api/calendar/config` reports whether token-based upload is enabled.
 
 ## Run locally
 
-Requirements: Node.js 20.19+.
+Requirements: Node.js 20.19 or newer.
 
 ```bash
 npm install
 npm run dev
 ```
 
-The app and API run together on port `5000`. For a production build:
+The Vite client and Express API run together on port `5000`. To build and run the production-mode server:
 
 ```bash
 npm run build
-npm start
+npm run start
 ```
 
-## What is in this MVP
-
-- List and week-calendar views share topic, format, and availability filters.
-- Demo events and busy intervals are seeded and clearly labeled.
-- Conflict status is based on interval overlap: `event.start < busy.end && event.end > busy.start`.
-- If calendar data or event times are missing, availability is `Unknown`.
-- Topic and format labels are separate; the deterministic classifier prefers recognized native labels and otherwise uses title/description keyword rules. Unclassified events remain unlabeled.
-- Saved events, preferences, and locally imported busy intervals use browser `localStorage`.
-- Event details include a direct `.ics` download; downloading is an explicit user action.
-- The event source interface includes a working mock source and a disabled Luma placeholder.
-
-The demo listings are fictional sample data. Their “Open on Luma” links go to the Luma homepage, not a real event registration page. Live Luma search is disabled: the available catalog entry is a Luma API connector, not a connected MCP provider, and public event-search tools, authentication requirements, response fields, pagination, and permissions have not been verified. No live search or registration data is claimed.
-
-## Calendar data and privacy
-
-The browser does not request Apple Calendar access. For a functional demo, open **Preferences → Import calendar JSON** and select a file containing either a `busy` array, a `busyIntervals` array, or a bare array. Each item requires ISO timestamps:
-
-```json
-{
-  "busy": [
-    {
-      "start": "2026-10-26T18:00:00-07:00",
-      "end": "2026-10-26T19:00:00-07:00",
-      "timeZone": "America/Los_Angeles",
-      "sourceId": "work"
-    }
-  ]
-}
-```
-
-Imported calendar times stay in this browser and are stored locally. Keep only start/end times, time zone, and an optional anonymous source ID in the file. Do not include event titles, attendees, or notes.
-
-### Apple Shortcut upload endpoint
-
-The app includes a token-protected busy-only webhook for an iOS Shortcut:
-
-- `POST /api/calendar/busy`
-- Header: `Authorization: Bearer <CALENDAR_SYNC_TOKEN>`
-- Header: `Content-Type: application/json`
-- Body: exactly one `busy` array with up to 500 entries. Each entry may contain only `start`, `end`, `timeZone`, and `sourceId`.
-- Request limit: 64 KiB. Start/end must be ISO-8601 timestamps with an explicit UTC offset or `Z`; end must be after start; dates must be within one year of receipt.
-
-Set `CALENDAR_SYNC_TOKEN` as a Replit Secret (or as a server environment variable locally). The endpoint returns `503` until it is configured and `401` for an incorrect token. Never commit the token to this repository or put it in frontend code.
-
-Suggested iPhone Shortcut setup:
-
-1. Create a Shortcut and use **Find Calendar Events** to select the calendars and date range you want to sync.
-2. Repeat over the results and build one dictionary per event containing only `start`, `end`, `timeZone`, and an optional anonymous `sourceId`. Do not add titles, attendees, or notes. Assemble the dictionaries into a `busy` array.
-3. Add **Get Contents of URL**, set the method to `POST`, use your app URL followed by `/api/calendar/busy`, and send the JSON body with the `Authorization` header above.
-4. Run the Shortcut manually to test it. The response includes the accepted interval count and sync time, not the intervals themselves.
-
-The webhook keeps the most recent upload in server memory only. It is a secure ingestion prototype: data is lost when the server restarts and is not yet connected to the browser's conflict view. For the working MVP conflict view, use the local JSON import. Durable or multi-user calendar sync needs user-scoped secure storage and access controls before production use.
-
-The status endpoint (`GET /api/calendar/status`) returns only the last sync time and interval count. `GET /api/calendar/config` reports whether the upload token is configured; neither endpoint returns interval data or secrets.
-
-## Architecture
-
-- `src/data/events.ts`: relative-date demo event and busy-interval seed data, defaults, and event-source adapters.
-- `src/lib/classification.ts`: deterministic, independent topic and format classification.
-- `src/lib/calendar.ts`: time-zone-safe interval comparison and availability.
-- `src/lib/useOpenWindow.ts`: local persistence for saved events, preferences, and demo/imported intervals.
-- `src/App.tsx`: responsive list/calendar experience, filters, event detail, preferences, local import, and `.ics` download.
-- `server/index.ts`: Express API, health/config endpoints, and validated Shortcut upload.
+To exercise sign-in and private persistence, configure the Replit-managed Clerk development instance and a **development** PostgreSQL `DATABASE_URL`. Do not use the production database for local development or tests. Do not commit secrets. Public demo discovery can run without private database configuration; private account writes require authentication and configured storage.
 
 ## Verification
 
 ```bash
 npm test
+npm run typecheck
 npm run build
 ```
 
-## Known limitations and next steps
+The persistence integration tests require the development database. They use uniquely identified test accounts and remove their test records; keep production credentials out of the test environment.
 
-- All event listings are demo data; the live Luma adapter is intentionally disabled.
-- Shortcut uploads are in-memory and do not currently drive the browser conflict view.
-- There is no multi-user authentication or persistent server database in this first version.
-- Direct Apple Calendar writeback is out of scope. Use the explicit `.ics` download if you choose to add an event.
+## Project structure
+
+- `src/App.tsx`: Discover, My Events, Calendar, filters, event details, and Preferences.
+- `src/data/events.ts`: fictional demo fixtures and the mock/disabled Luma event sources.
+- `src/lib/event-filtering.ts`, `event-sorting.ts`, `calendar-event-scope.ts`: shared search, filters, sorting, and Calendar scope behavior.
+- `src/lib/useOpenWindow.ts`: client-side account-session state, localStorage preservation, API synchronization, and local calendar import.
+- `server/account-routes.ts` and `server/account-store.ts`: authenticated account API and user-scoped PostgreSQL access.
+- `server/db/schema.ts`: Drizzle schema declarations.
+- `docs/schema.md`: readable schema reference.
+- `PLAN.md`: course plan and implementation status.
