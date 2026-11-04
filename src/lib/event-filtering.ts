@@ -16,14 +16,12 @@ export interface EventFilterOptions {
   preferences: Preferences;
   availabilityByEvent: Record<string, Availability>;
   attendanceByEventId: Record<string, AttendanceStatus>;
-  savedEventIds: string[];
-  starredEventIds?: string[];
-  starredOnly?: boolean;
+  starredEventIds: string[];
   selectedTopics: Topic[];
   selectedFormats: Format[];
   availabilityFilter: AvailabilityFilter;
   attendanceStatusFilter: AttendanceStatusFilter;
-  savedOnly: boolean;
+  myEventsOnly: boolean;
   searchQuery?: string;
   now?: number;
 }
@@ -41,7 +39,7 @@ export function filterEvents(events: EventItem[], options: EventFilterOptions): 
   return events.filter((event) => {
     const start = Date.parse(event.start);
     const isManual = event.source === "Manual";
-    const isPersonalCollection = options.savedOnly || options.starredOnly === true;
+    const isPersonalCollection = options.myEventsOnly;
     if (!isManual && !isPersonalCollection && (
       !Number.isFinite(start) ||
       start < now - 60 * 60 * 1000 ||
@@ -54,11 +52,9 @@ export function filterEvents(events: EventItem[], options: EventFilterOptions): 
     if (options.selectedTopics.length && !options.selectedTopics.some((topic) => event.topics.includes(topic))) return false;
     if (options.selectedFormats.length && !options.selectedFormats.some((format) => event.formats.includes(format))) return false;
     if (options.availabilityFilter !== "all" && options.availabilityByEvent[event.id] !== options.availabilityFilter) return false;
-    if (options.starredOnly && !(options.starredEventIds ?? []).includes(event.id)) return false;
-    if (!options.starredOnly && options.savedOnly && !isManual && !options.savedEventIds.includes(event.id)) return false;
+    if (options.myEventsOnly && !isManual && !options.starredEventIds.includes(event.id)) return false;
     if (
-      options.savedOnly &&
-      !options.starredOnly &&
+      options.myEventsOnly &&
       options.attendanceStatusFilter !== "all" &&
       (options.attendanceByEventId[event.id] ?? "interested") !== options.attendanceStatusFilter
     ) return false;

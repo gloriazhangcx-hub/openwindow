@@ -28,8 +28,6 @@ export type LegacyRawValues = {
 
 export type AccountData = {
   preferences: Preferences | null;
-  savedEventIds: string[];
-  savedEvents: EventItem[];
   starredEvents: EventItem[];
   manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
@@ -37,7 +35,7 @@ export type AccountData = {
 };
 
 export type MigrationResult = {
-  savedEvents: number;
+  starredEvents: number;
   busyIntervals: number;
   preferencesImported: boolean;
   snapshotStored: boolean;
@@ -50,7 +48,6 @@ export interface AccountStore {
     rawValues: LegacyRawValues,
     eventSnapshots: EventItem[],
   ): Promise<MigrationResult>;
-  setSavedEvent(clerkUserId: string, event: EventItem, saved: boolean): Promise<void>;
   setStarredEvent(clerkUserId: string, event: EventItem, starred: boolean): Promise<void>;
   updateAttendanceStatus(
     clerkUserId: string,
@@ -152,12 +149,16 @@ async function insertEvent(
   return existing.id;
 }
 
-async function addSavedEvent(
+async function addStar(
   transaction: Parameters<Parameters<Database["transaction"]>[0]>[0],
   userId: string,
   eventId: string,
-) {
-  await transaction.insert(savedEvents).values({ userId, eventId }).onConflictDoNothing();
+): Promise<boolean> {
+  const inserted = await transaction.insert(stars)
+    .values({ userId, eventId })
+    .onConflictDoNothing()
+    .returning({ eventId: stars.eventId });
+  return inserted.length > 0;
 }
 
 export function createAccountStore(suppliedDatabase?: Database): AccountStore {
@@ -171,29 +172,11 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         .from(userPreferences)
         .where(eq(userPreferences.userId, userId))
         .limit(1);
-      const savedRows = await database
-        .select({
-          id: events.id,
-          legacyEventId: events.legacyEventId,
-          attendanceStatus: savedEvents.attendanceStatus,
-          title: events.title,
-          description: events.description,
-          startsAt: events.startsAt,
-          endsAt: events.endsAt,
-          timeZone: events.timeZone,
-          city: events.city,
-          venue: events.venue,
-          source: events.source,
-          lumaUrl: events.lumaUrl,
-        })
-        .from(savedEvents)
-        .innerJoin(events, eq(savedEvents.eventId, events.id))
-        .where(eq(savedEvents.userId, userId))
-        .orderBy(asc(events.startsAt));
       const starredRows = await database
         .select({
           id: events.id,
           legacyEventId: events.legacyEventId,
+          attendanceStatus: stars.attendanceStatus,
           title: events.title,
           description: events.description,
           startsAt: events.startsAt,
@@ -208,7 +191,7 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         .innerJoin(events, eq(stars.eventId, events.id))
         .where(and(eq(stars.userId, userId), eq(events.userId, userId)))
         .orderBy(asc(events.startsAt));
-      const ids = [...new Set([...savedRows, ...starredRows].map((row) => row.id))];
+      const ids = [...new Set(starredRows.map((row) => row.id))];
       const topicRows = ids.length
         ? await database.select().from(eventTopics).where(inArray(eventTopics.eventId, ids))
         : [];
@@ -220,7 +203,7 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
       const formatsByEvent = new Map<string, string[]>();
       formatRows.forEach(({ eventId, format }) => formatsByEvent.set(eventId, [...(formatsByEvent.get(eventId) ?? []), format]));
       const itemsById = new Map<string, EventItem>();
-      for (const row of [...savedRows, ...starredRows]) {
+      for (const row of starredRows) {
         if (!row.legacyEventId) continue;
         itemsById.set(row.id, {
           id: row.legacyEventId,
@@ -237,10 +220,6 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
           lumaUrl: row.lumaUrl,
         });
       }
-      const savedEventItems = savedRows.flatMap((row) => {
-        const event = itemsById.get(row.id);
-        return event ? [event] : [];
-      });
       const starredEventItems = starredRows.flatMap((row) => {
         const event = itemsById.get(row.id);
         return event ? [event] : [];
@@ -269,13 +248,11 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
       }));
       return {
         preferences: preferenceRow?.preferences ?? null,
-        savedEventIds: savedEventItems.map((event) => event.id),
-        savedEvents: savedEventItems,
         starredEvents: starredEventItems,
         manualEvents: manualEventItems,
         attendanceByEventId: Object.fromEntries(
           [
-            ...savedRows.flatMap((row) => row.legacyEventId
+            ...starredRows.flatMap((row) => row.legacyEventId
               ? [[row.legacyEventId, row.attendanceStatus] as const]
               : []),
             ...manualRows.map((row) => [`manual:${row.id}`, row.attendanceStatus] as const),
@@ -309,13 +286,12 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
             .values({ userId, preferences })
             .onConflictDoNothing();
         }
-        let savedCount = 0;
+        let starredCount = 0;
         for (const id of savedIds) {
           const event = eventById.get(id);
           if (!event) continue;
           const eventId = await insertEvent(transaction, userId, event);
-          await addSavedEvent(transaction, userId, eventId);
-          savedCount += 1;
+          if (await addStar(transaction, userId, eventId)) starredCount += 1;
         }
         const uniqueIntervals = new Map(intervals.map((interval) => [busyKey(interval), interval]));
         for (const [legacyKey, interval] of uniqueIntervals) {
@@ -329,7 +305,7 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
           }).onConflictDoNothing();
         }
         return {
-          savedEvents: savedCount,
+          starredEvents: starredCount,
           busyIntervals: uniqueIntervals.size,
           preferencesImported: Boolean(preferences),
           snapshotStored: Boolean(snapshot),
@@ -337,33 +313,14 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
       });
     },
 
-    async setSavedEvent(clerkUserId, event, saved) {
-      const database = resolveDatabase();
-      const userId = await ensureUser(database, clerkUserId);
-      await database.transaction(async (transaction) => {
-        if (saved) {
-          const eventId = await insertEvent(transaction, userId, event);
-          await addSavedEvent(transaction, userId, eventId);
-        } else {
-          const [existing] = await transaction.select({ id: events.id })
-            .from(events)
-            .where(and(eq(events.userId, userId), eq(events.legacyEventId, event.id)))
-            .limit(1);
-          if (existing) {
-            await transaction.delete(savedEvents)
-              .where(and(eq(savedEvents.userId, userId), eq(savedEvents.eventId, existing.id)));
-          }
-        }
-      });
-    },
-
     async setStarredEvent(clerkUserId, event, starred) {
+      if (event.source === "Manual") return;
       const database = resolveDatabase();
       const userId = await ensureUser(database, clerkUserId);
       await database.transaction(async (transaction) => {
         if (starred) {
           const eventId = await insertEvent(transaction, userId, event);
-          await transaction.insert(stars).values({ userId, eventId }).onConflictDoNothing();
+          await addStar(transaction, userId, eventId);
           return;
         }
 
@@ -374,11 +331,11 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         if (!existing) return;
         await transaction.delete(stars)
           .where(and(eq(stars.userId, userId), eq(stars.eventId, existing.id)));
-        const [saved] = await transaction.select({ eventId: savedEvents.eventId })
+        const [legacySaved] = await transaction.select({ eventId: savedEvents.eventId })
           .from(savedEvents)
           .where(and(eq(savedEvents.userId, userId), eq(savedEvents.eventId, existing.id)))
           .limit(1);
-        if (!saved) {
+        if (!legacySaved) {
           await transaction.delete(events)
             .where(and(eq(events.id, existing.id), eq(events.userId, userId)));
         }
@@ -388,31 +345,31 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
     async updateAttendanceStatus(clerkUserId, eventId, status) {
       const database = resolveDatabase();
       const userId = await ensureUser(database, clerkUserId);
-      const [matchingSavedEvent] = await database
+      const [matchingStar] = await database
         .select({ id: events.id })
-        .from(savedEvents)
+        .from(stars)
         .innerJoin(
           events,
           and(
-            eq(savedEvents.eventId, events.id),
+            eq(stars.eventId, events.id),
             eq(events.userId, userId),
           ),
         )
         .where(and(
-          eq(savedEvents.userId, userId),
+          eq(stars.userId, userId),
           eq(events.legacyEventId, eventId),
         ))
         .limit(1);
-      if (!matchingSavedEvent) return false;
+      if (!matchingStar) return false;
 
       const [updated] = await database
-        .update(savedEvents)
+        .update(stars)
         .set({ attendanceStatus: status })
         .where(and(
-          eq(savedEvents.userId, userId),
-          eq(savedEvents.eventId, matchingSavedEvent.id),
+          eq(stars.userId, userId),
+          eq(stars.eventId, matchingStar.id),
         ))
-        .returning({ eventId: savedEvents.eventId });
+        .returning({ eventId: stars.eventId });
       return Boolean(updated);
     },
 

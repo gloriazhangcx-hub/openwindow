@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { migrateLegacyStars } from "./legacy-star-migration";
+import { ensureStarsAttendanceSchema, migrateSavedEventsToStars } from "./saved-events-to-stars-migration";
 
 async function main() {
   const connectionString = process.env.DATABASE_URL;
@@ -8,9 +9,13 @@ async function main() {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const migrated = await migrateLegacyStars(client);
+    await ensureStarsAttendanceSchema(client);
+    const legacyConverted = await migrateLegacyStars(client);
+    const starred = await migrateSavedEventsToStars(client);
     await client.query("COMMIT");
-    console.log(`Legacy saves migrated: ${migrated}.`);
+    console.log(
+      `Legacy save rows reclassified: ${legacyConverted}; saved events copied into Stars: ${starred.copied}; already applied: ${starred.alreadyApplied}.`,
+    );
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

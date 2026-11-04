@@ -1,4 +1,4 @@
-# Feature 5 — Bookmark and My Events verification
+# Feature 5 — Starred My Events
 
 ## User request
 
@@ -27,11 +27,14 @@ The goal is to verify and strengthen what already exists, not to build duplicate
 
 ## Audit and implementation notes
 
-- Existing Bookmark behavior is persisted through `saved_events`; it drives My Events and stores the attendance status. Signed-out bookmarks continue to use the existing local-only flow.
-- The database already had a separate `stars` junction table, but the app had no Star API, state, control, or Starred view. Therefore, Bookmark/My Events alone did not meet Feature 5.
-- Added an authenticated, server-owned Star relationship. Star/unstar writes never create or delete a `saved_events` row; unbookmarking leaves a Star intact, and unstarring leaves a bookmark intact. Both junctions are scoped to the verified Clerk user and point to that user’s event snapshot.
-- Added an independent Star control in Discover/event details and a Saved/Starred tab within the existing My Events view. Stars require sign-in; signed-out Bookmark behavior remains unchanged.
-- Starred events load from the account API after sign-in and are isolated during account switching. Starred collections are not hidden by discovery city/date-horizon preferences. The Starred Calendar filter keeps personal calendar busy intervals and manually added commitments visible.
-- No database schema change or migration was needed: `saved_events` and `stars` already exist as separate user/event junction tables. The only change to account persistence is reading and writing the existing `stars` relationship.
-- Added route, PostgreSQL persistence/reload, user-isolation, save/star independence, and collection-filtering tests. Development database identity was confirmed as `heliumdb`; integration tests use disposable `test_` accounts and clean them up.
-- Latest verification: 49 tests passed, 0 skipped; typecheck and build passed.
+- The user revised the design after reviewing the first PR #20 implementation:
+
+> Replace Bookmark with one Star action. Keep the existing My Events view as the only Starred View; do not add another collection or Saved/Starred tabs. Preserve saved-event records, manual events, and attendance statuses. Use the `stars` junction, make migration idempotent without duplicate relationships or overwritten statuses, and never delete manual events when unstarring. Update this same Issue #19 / PR #20 only. Do not run production migrations, deploy, or merge.
+
+- The revised UI has one Star action in the existing event-action locations and one My Events collection containing starred suggestions and all manual events.
+- `stars` is the active user/event junction and stores attendance status for suggested events. Manual-event status remains in `manual_events`.
+- The additive migration copies legacy `saved_events` membership and status into `stars`; it does not delete legacy rows or original localStorage values. The composite key prevents duplicates. Conflicting attendance values abort the migration rather than overwriting either value.
+- Existing local-only stars continue using the original storage key and account-ownership safeguards. Sign-in imports those values idempotently into the authenticated user’s `stars`.
+- Server reads and writes derive the account from the verified Clerk session. Unstar removes only the Star relationship and never targets `manual_events`.
+- Tests cover sign-in migration idempotency, Star/Unstar, persisted attendance after reload, cross-account isolation, conflict-safe data migration, manual-event survival, route validation, and collection filtering.
+- Development database identity was confirmed as `heliumdb`; integration tests use disposable `test_` accounts and clean them up. No production migration or deployment is performed.

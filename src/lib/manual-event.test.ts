@@ -30,12 +30,12 @@ test("personal events appear in My Events despite discovery city and date-horizo
     preferences: { ...DEFAULT_PREFERENCES, cities: ["San Francisco"], dateHorizonDays: 1 },
     availabilityByEvent: { [manualEvent.id]: "available" },
     attendanceByEventId: { [manualEvent.id]: "interested" },
-    savedEventIds: [],
+    starredEventIds: [],
     selectedTopics: [],
     selectedFormats: [],
     availabilityFilter: "all",
     attendanceStatusFilter: "all",
-    savedOnly: true,
+    myEventsOnly: true,
     now,
   });
   assert.deepEqual(filtered.map((event) => event.id), [manualEvent.id]);

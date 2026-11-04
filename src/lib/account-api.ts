@@ -3,8 +3,6 @@ import type { LegacyRawValues } from "./legacy-storage";
 
 export type AccountData = {
   preferences: Preferences | null;
-  savedEventIds: string[];
-  savedEvents: EventItem[];
   starredEvents: EventItem[];
   manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
@@ -32,18 +30,13 @@ export const accountApi = {
       method: "POST",
       body: JSON.stringify({ rawValues, eventSnapshots }),
     }),
-  setSavedEvent: (event: EventItem, saved: boolean) =>
-    request("/saved-events", {
-      method: "PUT",
-      body: JSON.stringify({ event, saved }),
-    }),
   setStarredEvent: (event: EventItem, starred: boolean) =>
     request("/stars", {
       method: "PUT",
       body: JSON.stringify({ event, starred }),
     }),
   updateAttendanceStatus: (eventId: string, status: AttendanceStatus) =>
-    request("/saved-events/attendance", {
+    request("/stars/attendance", {
       method: "PUT",
       body: JSON.stringify({ eventId, status }),
     }),
