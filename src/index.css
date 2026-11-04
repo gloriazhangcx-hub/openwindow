@@ -75,6 +75,8 @@ h1,h2,h3,p { margin-top:0; }
 .view-switch button { border:0;background:transparent;border-radius:7px;padding:8px 12px;display:flex;align-items:center;gap:7px;color:#766f84;font-size:12px;font-weight:600;cursor:pointer; }
 .view-switch button.selected { background:#fffefa;color:#4c387e;box-shadow:0 1px 4px #392b6017; }
 .toolbar-right { display:flex;align-items:center;gap:10px; }
+.list-sort-control { display:flex;align-items:center;gap:5px;color:#80798d;font-size:10px;font-weight:600;white-space:nowrap; }
+.list-sort-control select { max-width:178px;height:30px;border:1px solid #e4deeb;background:#fbf9fd;border-radius:7px;padding:0 8px;color:#4b3a74;font-size:10px; }
 .attendance-filter { display:flex;align-items:center;gap:5px;color:#80798d;font-size:10px;font-weight:600;white-space:nowrap; }
 .attendance-filter select { max-width:160px;height:30px;border:1px solid #e4deeb;background:#fbf9fd;border-radius:7px;padding:0 8px;color:#4b3a74;font-size:10px; }
 .my-events-toggle { display:flex;align-items:center;gap:6px;background:none;border:0;color:#718078;font-size:12px;font-weight:600;cursor:pointer;padding:8px;border-radius:8px; }
@@ -252,6 +254,8 @@ h1,h2,h3,p { margin-top:0; }
  .panel-toolbar {padding:12px;align-items:flex-start}
  .view-switch button {padding:8px 9px;font-size:11px}
  .toolbar-right {gap:4px;flex-direction:column;align-items:flex-end}
+  .list-sort-control {font-size:9px}
+  .list-sort-control select {max-width:150px;font-size:9px;padding:0 6px}
  .count-label {font-size:9px}
  .events-list {padding:2px 12px 20px}
  .event-row {grid-template-columns:57px minmax(0,1fr) auto;gap:8px;padding:13px 0;align-items:start}
