@@ -115,3 +115,35 @@ test("calendar event accessible labels include attendance status without replaci
     "Founders Breakfast, Conflict, Attendance status: Registered",
   );
 });
+
+test("overnight personal events appear as clipped segments on both calendar dates", () => {
+  const overnight = eventAt("overnight", 23, {
+    start: "2027-01-04T07:00:00.000Z",
+    end: "2027-01-04T09:00:00.000Z",
+  });
+  const firstDay = getCalendarDayBlocks(
+    new Date(2027, 0, 3, 12),
+    [overnight],
+    null,
+    {},
+    [],
+    {},
+  );
+  const nextDay = getCalendarDayBlocks(
+    new Date(2027, 0, 4, 12),
+    [overnight],
+    null,
+    {},
+    [],
+    {},
+  );
+
+  assert.equal(firstDay.length, 1);
+  assert.equal(firstDay[0].kind, "event");
+  assert.equal(firstDay[0].start.toISOString(), "2027-01-04T07:00:00.000Z");
+  assert.equal(firstDay[0].end.toISOString(), "2027-01-04T08:00:00.000Z");
+  assert.equal(nextDay.length, 1);
+  assert.equal(nextDay[0].kind, "event");
+  assert.equal(nextDay[0].start.toISOString(), "2027-01-04T08:00:00.000Z");
+  assert.equal(nextDay[0].end.toISOString(), "2027-01-04T09:00:00.000Z");
+});

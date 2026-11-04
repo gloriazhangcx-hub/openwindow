@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
-import type { AttendanceStatus, BusyInterval, EventItem, Preferences } from "../src/types";
+import type { AttendanceStatus, BusyInterval, EventItem, ManualEventInput, Preferences } from "../src/types";
 import {
   busyIntervals,
   eventFormats,
   eventTopics,
   events,
+  manualEvents,
   migrationSnapshots,
   savedEvents,
   userPreferences,
@@ -28,6 +29,7 @@ export type AccountData = {
   preferences: Preferences | null;
   savedEventIds: string[];
   savedEvents: EventItem[];
+  manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
   busyIntervals: BusyInterval[];
 };
@@ -52,6 +54,10 @@ export interface AccountStore {
     eventId: string,
     status: AttendanceStatus,
   ): Promise<boolean>;
+  createManualEvent(clerkUserId: string, input: ManualEventInput): Promise<EventItem>;
+  updateManualEvent(clerkUserId: string, eventId: string, input: ManualEventInput): Promise<EventItem | null>;
+  deleteManualEvent(clerkUserId: string, eventId: string): Promise<boolean>;
+  updateManualEventAttendance(clerkUserId: string, eventId: string, status: AttendanceStatus): Promise<boolean>;
   savePreferences(clerkUserId: string, preferences: Preferences): Promise<void>;
   replaceBusyIntervals(clerkUserId: string, intervals: BusyInterval[]): Promise<void>;
   clearBusyIntervals(clerkUserId: string): Promise<void>;
@@ -66,6 +72,25 @@ async function ensureUser(database: Database, clerkUserId: string): Promise<stri
     .limit(1);
   if (!user) throw new Error("Authenticated account could not be initialized.");
   return user.id;
+}
+
+function toManualEvent(row: typeof manualEvents.$inferSelect): EventItem {
+  return {
+    id: `manual:${row.id}`,
+    title: row.title,
+    description: row.description,
+    start: row.startsAt.toISOString(),
+    end: row.endsAt.toISOString(),
+    timeZone: row.timeZone,
+    city: "",
+    venue: row.location,
+    location: row.location,
+    topics: row.topics,
+    formats: row.formats,
+    source: "Manual",
+    lumaUrl: "",
+    eventUrl: row.eventUrl,
+  };
 }
 
 function busyKey(interval: BusyInterval): string {
@@ -187,6 +212,12 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         source: row.source === "Luma" ? "Luma" : "Demo",
         lumaUrl: row.lumaUrl,
       }] : []);
+      const manualRows = await database
+        .select()
+        .from(manualEvents)
+        .where(eq(manualEvents.userId, userId))
+        .orderBy(asc(manualEvents.startsAt));
+      const manualEventItems = manualRows.map(toManualEvent);
       const intervalRows = await database
         .select({
           start: busyIntervals.startsAt,
@@ -207,10 +238,14 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         preferences: preferenceRow?.preferences ?? null,
         savedEventIds: savedEventItems.map((event) => event.id),
         savedEvents: savedEventItems,
+        manualEvents: manualEventItems,
         attendanceByEventId: Object.fromEntries(
-          savedRows.flatMap((row) => row.legacyEventId
-            ? [[row.legacyEventId, row.attendanceStatus] as const]
-            : []),
+          [
+            ...savedRows.flatMap((row) => row.legacyEventId
+              ? [[row.legacyEventId, row.attendanceStatus] as const]
+              : []),
+            ...manualRows.map((row) => [`manual:${row.id}`, row.attendanceStatus] as const),
+          ],
         ),
         busyIntervals: storedIntervals,
       };
@@ -317,6 +352,70 @@ export function createAccountStore(suppliedDatabase?: Database): AccountStore {
         ))
         .returning({ eventId: savedEvents.eventId });
       return Boolean(updated);
+    },
+
+    async createManualEvent(clerkUserId, input) {
+      const database = resolveDatabase();
+      const userId = await ensureUser(database, clerkUserId);
+      const [row] = await database
+        .insert(manualEvents)
+        .values({
+          userId,
+          title: input.title,
+          description: input.description,
+          startsAt: new Date(input.start),
+          endsAt: new Date(input.end),
+          timeZone: input.timeZone,
+          location: input.location,
+          eventUrl: input.eventUrl,
+          topics: input.topics,
+          formats: input.formats,
+        })
+        .returning();
+      return toManualEvent(row);
+    },
+
+    async updateManualEvent(clerkUserId, eventId, input) {
+      const database = resolveDatabase();
+      const userId = await ensureUser(database, clerkUserId);
+      const [row] = await database
+        .update(manualEvents)
+        .set({
+          title: input.title,
+          description: input.description,
+          startsAt: new Date(input.start),
+          endsAt: new Date(input.end),
+          timeZone: input.timeZone,
+          location: input.location,
+          eventUrl: input.eventUrl,
+          topics: input.topics,
+          formats: input.formats,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(manualEvents.id, eventId), eq(manualEvents.userId, userId)))
+        .returning();
+      return row ? toManualEvent(row) : null;
+    },
+
+    async deleteManualEvent(clerkUserId, eventId) {
+      const database = resolveDatabase();
+      const userId = await ensureUser(database, clerkUserId);
+      const deleted = await database
+        .delete(manualEvents)
+        .where(and(eq(manualEvents.id, eventId), eq(manualEvents.userId, userId)))
+        .returning({ id: manualEvents.id });
+      return deleted.length > 0;
+    },
+
+    async updateManualEventAttendance(clerkUserId, eventId, status) {
+      const database = resolveDatabase();
+      const userId = await ensureUser(database, clerkUserId);
+      const updated = await database
+        .update(manualEvents)
+        .set({ attendanceStatus: status, updatedAt: new Date() })
+        .where(and(eq(manualEvents.id, eventId), eq(manualEvents.userId, userId)))
+        .returning({ id: manualEvents.id });
+      return updated.length > 0;
     },
 
     async savePreferences(clerkUserId, preferences) {

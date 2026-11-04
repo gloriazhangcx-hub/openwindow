@@ -18,6 +18,7 @@ class MemoryStore implements AccountStore {
       preferences: null,
       savedEventIds: [],
       savedEvents: [],
+      manualEvents: [],
       attendanceByEventId: {},
       busyIntervals: [],
     };
@@ -63,6 +64,67 @@ class MemoryStore implements AccountStore {
     const row = this.row(userId);
     if (!row.savedEventIds.includes(eventId)) return false;
     row.attendanceByEventId[eventId] = status;
+    return true;
+  }
+
+  async createManualEvent(userId: string, input: import("../src/types").ManualEventInput) {
+    const row = this.row(userId);
+    const event: EventItem = {
+      id: `manual:00000000-0000-4000-8000-${String(row.manualEvents.length + 1).padStart(12, "0")}`,
+      title: input.title,
+      description: input.description,
+      start: input.start,
+      end: input.end,
+      timeZone: input.timeZone,
+      city: "",
+      venue: input.location,
+      location: input.location,
+      eventUrl: input.eventUrl,
+      topics: input.topics,
+      formats: input.formats,
+      source: "Manual",
+      lumaUrl: "",
+    };
+    row.manualEvents.push(event);
+    row.attendanceByEventId[event.id] = "interested";
+    return event;
+  }
+
+  async updateManualEvent(userId: string, eventId: string, input: import("../src/types").ManualEventInput) {
+    const row = this.row(userId);
+    const existing = row.manualEvents.find((event) => event.id === `manual:${eventId}`);
+    if (!existing) return null;
+    const updated: EventItem = {
+      ...existing,
+      title: input.title,
+      description: input.description,
+      start: input.start,
+      end: input.end,
+      timeZone: input.timeZone,
+      location: input.location,
+      venue: input.location,
+      eventUrl: input.eventUrl,
+      topics: input.topics,
+      formats: input.formats,
+    };
+    row.manualEvents = row.manualEvents.map((event) => event.id === existing.id ? updated : event);
+    return updated;
+  }
+
+  async deleteManualEvent(userId: string, eventId: string) {
+    const row = this.row(userId);
+    const id = `manual:${eventId}`;
+    if (!row.manualEvents.some((event) => event.id === id)) return false;
+    row.manualEvents = row.manualEvents.filter((event) => event.id !== id);
+    delete row.attendanceByEventId[id];
+    return true;
+  }
+
+  async updateManualEventAttendance(userId: string, eventId: string, status: AttendanceStatus) {
+    const row = this.row(userId);
+    const id = `manual:${eventId}`;
+    if (!row.manualEvents.some((event) => event.id === id)) return false;
+    row.attendanceByEventId[id] = status;
     return true;
   }
 
@@ -193,6 +255,102 @@ test("attendance updates validate status and stay private to the saved-event own
     assert.equal(aliceData.attendanceByEventId[event.id], "registered");
     assert.deepEqual(bobData.savedEventIds, []);
     assert.deepEqual(bobData.attendanceByEventId, {});
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
+test("manual event routes validate inputs and isolate create, edit, status, and delete by account", async () => {
+  const store = new MemoryStore();
+  const app = express();
+  app.use("/api/account", createAccountRouter(
+    store,
+    (request) => request.header("x-test-session") ?? null,
+  ));
+  const server = createServer(app);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}/api/account`;
+  const input = {
+    title: "Community Workshop",
+    description: "Meet local builders.",
+    start: "2027-01-03T18:00:00.000Z",
+    end: "2027-01-03T20:00:00.000Z",
+    timeZone: "America/Los_Angeles",
+    location: "Berkeley",
+    eventUrl: "https://example.com/events/workshop",
+    topics: ["AI & Tech"],
+    formats: ["Workshop"],
+  };
+  const request = (path: string, user: string, method = "GET", body?: unknown) =>
+    fetch(`${base}${path}`, {
+      method,
+      headers: {
+        "x-test-session": user,
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+
+  try {
+    const spoofedCreate = await request("/manual-events", "alice", "POST", { ...input, userId: "bob" });
+    assert.equal(spoofedCreate.status, 400);
+    const invalidCreate = await request("/manual-events", "alice", "POST", {
+      ...input,
+      end: "2027-01-03T17:00:00.000Z",
+    });
+    assert.equal(invalidCreate.status, 400);
+    const invalidDateCreate = await request("/manual-events", "alice", "POST", {
+      ...input,
+      start: "2027-02-30T18:00:00.000Z",
+    });
+    assert.equal(invalidDateCreate.status, 400);
+    const invalidUrlCreate = await request("/manual-events", "alice", "POST", {
+      ...input,
+      eventUrl: "javascript:alert(1)",
+    });
+    assert.equal(invalidUrlCreate.status, 400);
+
+    const createdResponse = await request("/manual-events", "alice", "POST", input);
+    assert.equal(createdResponse.status, 201);
+    const created = (await createdResponse.json() as { event: EventItem }).event;
+    assert.match(created.id, /^manual:[0-9a-f-]{36}$/i);
+    assert.equal(created.source, "Manual");
+    assert.equal(created.location, "Berkeley");
+
+    const aliceData = await (await request("/data", "alice")).json() as AccountData;
+    const bobData = await (await request("/data", "bob")).json() as AccountData;
+    assert.equal(aliceData.manualEvents.length, 1);
+    assert.equal(aliceData.attendanceByEventId[created.id], "interested");
+    assert.deepEqual(aliceData.savedEventIds, []);
+    assert.deepEqual(bobData.manualEvents, []);
+    assert.deepEqual(bobData.attendanceByEventId, {});
+
+    const eventId = created.id.slice("manual:".length);
+    const edited = await request(`/manual-events/${eventId}`, "alice", "PUT", {
+      ...input,
+      title: "Updated Workshop",
+    });
+    assert.equal(edited.status, 200);
+    assert.equal(((await edited.json()) as { event: EventItem }).event.title, "Updated Workshop");
+    assert.equal((await request(`/manual-events/${eventId}`, "bob", "PUT", input)).status, 404);
+    assert.equal((await request(`/manual-events/${eventId}/attendance`, "bob", "PUT", { status: "registered" })).status, 404);
+    assert.equal((await request(`/manual-events/${eventId}/attendance`, "alice", "PUT", { status: "registered" })).status, 200);
+
+    const bobDelete = await request(`/manual-events/${eventId}`, "bob", "DELETE");
+    assert.equal(bobDelete.status, 404);
+    const aliceDelete = await request(`/manual-events/${eventId}`, "alice", "DELETE");
+    assert.equal(aliceDelete.status, 200);
+    assert.deepEqual((await (await request("/data", "alice")).json() as AccountData).manualEvents, []);
+    assert.equal((await request("/manual-events", "alice", "POST", input)).status, 201);
+    assert.equal((await fetch(`${base}/manual-events`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    })).status, 401);
   } finally {
     server.close();
     await once(server, "close");

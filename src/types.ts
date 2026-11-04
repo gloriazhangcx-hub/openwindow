@@ -39,8 +39,22 @@ export interface EventItem {
   venue: string;
   topics: Topic[];
   formats: Format[];
-  source: "Demo" | "Luma";
+  source: "Demo" | "Luma" | "Manual";
   lumaUrl: string;
+  location?: string;
+  eventUrl?: string;
+}
+
+export interface ManualEventInput {
+  title: string;
+  description: string;
+  start: string;
+  end: string;
+  timeZone: string;
+  location: string;
+  eventUrl: string;
+  topics: Topic[];
+  formats: Format[];
 }
 
 export interface BusyInterval {

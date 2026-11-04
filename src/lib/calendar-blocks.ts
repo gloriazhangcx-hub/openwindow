@@ -5,15 +5,7 @@ import {
   type BusyInterval,
   type EventItem,
 } from "../types";
-
-function dayKey(date: Date, timeZone = "America/Los_Angeles") {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
-}
+import { clipIntervalToCalendarDay } from "./calendar-grid-layout";
 
 export type CalendarEventBlock = {
   kind: "event";
@@ -41,8 +33,9 @@ export function getCalendarAttendanceStatus(
   eventId: string,
   savedEventIds: string[],
   attendanceByEventId: Record<string, AttendanceStatus>,
+  isManual = false,
 ): AttendanceStatus | null {
-  if (!savedEventIds.includes(eventId)) return null;
+  if (!isManual && !savedEventIds.includes(eventId)) return null;
   return attendanceByEventId[eventId] ?? "interested";
 }
 
@@ -58,6 +51,7 @@ export function getCalendarEventAccessibleLabel(
   };
   return [
     event.title,
+    event.source === "Manual" ? "Added by you" : null,
     availabilityLabel[availability],
     attendanceStatus ? `Attendance status: ${ATTENDANCE_STATUS_LABELS[attendanceStatus]}` : null,
   ].filter(Boolean).join(", ");
@@ -71,31 +65,47 @@ export function getCalendarDayBlocks(
   savedEventIds: string[],
   attendanceByEventId: Record<string, AttendanceStatus>,
 ): CalendarDayBlock[] {
-  const targetDay = dayKey(day);
-  const eventBlocks: CalendarEventBlock[] = events
-    .filter((event) => dayKey(new Date(event.start), event.timeZone) === targetDay)
-    .map((event) => ({
+  const eventBlocks: CalendarEventBlock[] = events.flatMap((event) => {
+    const zone = event.timeZone || "America/Los_Angeles";
+    const visibleRange = clipIntervalToCalendarDay(
+      new Date(event.start),
+      new Date(event.end),
+      day,
+      zone,
+    );
+    return visibleRange ? [{
       kind: "event",
       key: event.id,
-      start: new Date(event.start),
-      end: new Date(event.end),
+      start: visibleRange.start,
+      end: visibleRange.end,
       event,
-      zone: event.timeZone,
+      zone,
       availability: availabilityByEventId[event.id] ?? "unknown",
-      attendanceStatus: getCalendarAttendanceStatus(event.id, savedEventIds, attendanceByEventId),
-    }));
-  const busyBlocks: CalendarBusyBlock[] = (busyIntervals ?? [])
-    .filter((interval) =>
-      dayKey(new Date(interval.start), interval.timeZone) === dayKey(day, interval.timeZone),
-    )
-    .map((interval, index) => ({
+      attendanceStatus: getCalendarAttendanceStatus(
+        event.id,
+        savedEventIds,
+        attendanceByEventId,
+        event.source === "Manual",
+      ),
+    }] : [];
+  });
+  const busyBlocks: CalendarBusyBlock[] = (busyIntervals ?? []).flatMap((interval, index) => {
+    const zone = interval.timeZone ?? "America/Los_Angeles";
+    const visibleRange = clipIntervalToCalendarDay(
+      new Date(interval.start),
+      new Date(interval.end),
+      day,
+      zone,
+    );
+    return visibleRange ? [{
       kind: "busy",
       key: `busy-${index}-${interval.start}`,
-      start: new Date(interval.start),
-      end: new Date(interval.end),
+      start: visibleRange.start,
+      end: visibleRange.end,
       interval,
-      zone: interval.timeZone ?? "America/Los_Angeles",
-    }));
+      zone,
+    }] : [];
+  });
 
   return [...eventBlocks, ...busyBlocks];
 }
@@ -105,6 +115,11 @@ export function countCalendarBusyIntervalsForDay(
   busyIntervals: BusyInterval[] | null,
 ): number {
   return (busyIntervals ?? []).filter((interval) =>
-    dayKey(new Date(interval.start), interval.timeZone) === dayKey(day, interval.timeZone),
+    clipIntervalToCalendarDay(
+      new Date(interval.start),
+      new Date(interval.end),
+      day,
+      interval.timeZone ?? "America/Los_Angeles",
+    ) !== null,
   ).length;
 }

@@ -2,10 +2,11 @@ import express, { type Request, type RequestHandler } from "express";
 import type { AttendanceStatus, BusyInterval, EventItem, Preferences } from "../src/types";
 import type { AccountStore, LegacyRawValues } from "./account-store";
 import {
-  isPreferences,
   isAttendanceStatus,
+  isPreferences,
   parseBusyIntervals,
   parseEventItem,
+  parseManualEventInput,
   validRawValues,
 } from "./account-validation";
 
@@ -36,6 +37,10 @@ function record(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
 
+function validManualEventId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function sendFailure(response: express.Response, error: unknown) {
   if (error instanceof Error && error.message.includes("DATABASE_URL")) {
     return response.status(503).json({ error: "Private account storage is not configured in this environment." });
@@ -52,6 +57,66 @@ export function createAccountRouter(store: AccountStore, resolveUserId: UserIdRe
   router.get("/data", async (_request, response) => {
     try {
       return response.json(await store.readAccount(accountId(response)));
+    } catch (error) {
+      return sendFailure(response, error);
+    }
+  });
+
+  router.post("/manual-events", async (request, response) => {
+    const input = parseManualEventInput(request.body);
+    if (!input) return response.status(400).json({ error: "Check the event details and try again." });
+    try {
+      const event = await store.createManualEvent(accountId(response), input);
+      return response.status(201).json({ event });
+    } catch (error) {
+      return sendFailure(response, error);
+    }
+  });
+
+  router.put("/manual-events/:eventId", async (request, response) => {
+    const input = parseManualEventInput(request.body);
+    if (!validManualEventId(request.params.eventId) || !input) {
+      return response.status(400).json({ error: "Check the event details and try again." });
+    }
+    try {
+      const event = await store.updateManualEvent(accountId(response), request.params.eventId, input);
+      if (!event) return response.status(404).json({ error: "Personal event was not found." });
+      return response.json({ event });
+    } catch (error) {
+      return sendFailure(response, error);
+    }
+  });
+
+  router.delete("/manual-events/:eventId", async (request, response) => {
+    if (!validManualEventId(request.params.eventId)) {
+      return response.status(400).json({ error: "Personal event ID is invalid." });
+    }
+    try {
+      const deleted = await store.deleteManualEvent(accountId(response), request.params.eventId);
+      if (!deleted) return response.status(404).json({ error: "Personal event was not found." });
+      return response.json({ deleted: true });
+    } catch (error) {
+      return sendFailure(response, error);
+    }
+  });
+
+  router.put("/manual-events/:eventId/attendance", async (request, response) => {
+    if (
+      !validManualEventId(request.params.eventId) ||
+      !record(request.body) ||
+      Object.keys(request.body).some((key) => key !== "status") ||
+      !isAttendanceStatus(request.body.status)
+    ) {
+      return response.status(400).json({ error: "Attendance status update is invalid." });
+    }
+    try {
+      const updated = await store.updateManualEventAttendance(
+        accountId(response),
+        request.params.eventId,
+        request.body.status,
+      );
+      if (!updated) return response.status(404).json({ error: "Personal event was not found." });
+      return response.json({ updated: true, status: request.body.status });
     } catch (error) {
       return sendFailure(response, error);
     }

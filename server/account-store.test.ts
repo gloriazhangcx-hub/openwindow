@@ -6,6 +6,7 @@ import { DEFAULT_PREFERENCES, demoEvents } from "../src/data/events";
 import {
   busyIntervals,
   events,
+  manualEvents,
   migrationSnapshots,
   savedEvents,
   schemaMigrations,
@@ -13,6 +14,7 @@ import {
   users,
 } from "./db/schema";
 import type { LegacyRawValues } from "./account-store";
+import type { ManualEventInput } from "../src/types";
 
 test("PostgreSQL account storage is isolated and local migration is idempotent", {
   skip: !process.env.DATABASE_URL,
@@ -77,10 +79,49 @@ test("PostgreSQL account storage is isolated and local migration is idempotent",
     assert.equal(aliceAfterStatus.attendanceByEventId[event.id], "planning_to_attend");
     assert.equal(bobAfterCrossAccountStatusAttempt.attendanceByEventId[demoEvents[1].id], "interested");
 
+    const manualInput: ManualEventInput = {
+      title: "Personal Community Meetup",
+      description: "An event added by the account owner.",
+      start: start.toISOString(),
+      end: end.toISOString(),
+      timeZone: "America/Los_Angeles",
+      location: "Oakland",
+      eventUrl: "https://example.com/meetup",
+      topics: ["Social Impact"],
+      formats: ["Networking"],
+    };
+    const manualEvent = await store.createManualEvent(aliceId, manualInput);
+    assert.equal(manualEvent.source, "Manual");
+    assert.match(manualEvent.id, /^manual:[0-9a-f-]{36}$/i);
+    assert.equal(manualEvent.location, "Oakland");
+    const aliceWithManualEvent = await store.readAccount(aliceId);
+    const bobWithoutManualEvent = await store.readAccount(bobId);
+    assert.equal(aliceWithManualEvent.manualEvents.length, 1);
+    assert.equal(aliceWithManualEvent.attendanceByEventId[manualEvent.id], "interested");
+    assert.equal(aliceWithManualEvent.savedEventIds.includes(manualEvent.id), false);
+    assert.deepEqual(bobWithoutManualEvent.manualEvents, []);
+    assert.equal(await store.updateManualEventAttendance(bobId, manualEvent.id.slice("manual:".length), "registered"), false);
+    assert.equal(await store.updateManualEvent(bobId, manualEvent.id.slice("manual:".length), manualInput), null);
+    assert.equal(await store.deleteManualEvent(bobId, manualEvent.id.slice("manual:".length)), false);
+    assert.equal(await store.updateManualEventAttendance(aliceId, manualEvent.id.slice("manual:".length), "planning_to_attend"), true);
+    const editedManualEvent = await store.updateManualEvent(aliceId, manualEvent.id.slice("manual:".length), {
+      ...manualInput,
+      title: "Updated Community Meetup",
+    });
+    assert.equal(editedManualEvent?.title, "Updated Community Meetup");
     const aliceUser = await db.select({ id: users.id }).from(users).where(eq(users.clerkUserId, aliceId)).limit(1);
     const bobUser = await db.select({ id: users.id }).from(users).where(eq(users.clerkUserId, bobId)).limit(1);
+    const manualRows = await db.select({ id: manualEvents.id, title: manualEvents.title })
+      .from(manualEvents)
+      .where(eq(manualEvents.userId, aliceUser[0].id));
     assert.equal(aliceUser.length, 1);
     assert.equal(bobUser.length, 1);
+    assert.equal(manualRows.length, 1);
+    assert.equal(manualRows[0].title, "Updated Community Meetup");
+    assert.equal(await store.deleteManualEvent(aliceId, manualEvent.id.slice("manual:".length)), true);
+    const aliceAfterManualDelete = await store.readAccount(aliceId);
+    assert.deepEqual(aliceAfterManualDelete.manualEvents, []);
+    assert.equal(Object.hasOwn(aliceAfterManualDelete.attendanceByEventId, manualEvent.id), false);
     const bobSavedRowsAfterSave = await db.select({ eventId: savedEvents.eventId })
       .from(savedEvents)
       .where(eq(savedEvents.userId, bobUser[0].id));
