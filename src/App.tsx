@@ -18,6 +18,7 @@ import {
 import { findNearestUpcomingEvent } from "./lib/saved-events";
 import { filterEvents } from "./lib/event-filtering";
 import { sortEventsByStart, type EventSortOrder } from "./lib/event-sorting";
+import { calculateDiscoverSummary, calculateMyEventsSummary } from "./lib/dashboard";
 import {
   countCalendarBusyIntervalsForDay,
   getCalendarAttendanceStatus,
@@ -27,6 +28,7 @@ import {
 import { shouldShowMyEventsAttendanceControl } from "./lib/event-attendance";
 import { CalendarAttendanceMarker } from "./components/CalendarAttendanceMarker";
 import { ManualEventDialog } from "./components/ManualEventDialog";
+import { DiscoverSummaryStrip, MyEventsDashboard } from "./components/CompactDashboard";
 import {
   ATTENDANCE_STATUSES,
   ATTENDANCE_STATUS_LABELS,
@@ -180,6 +182,21 @@ function App() {
       ? sortEventsByStart(filteredEvents, dateSortOrder)
       : filteredEvents,
     [filteredEvents, dateSortOrder, myEventsOnly, view],
+  );
+
+  const discoverSummary = useMemo(
+    () => calculateDiscoverSummary(filteredEvents, model.availabilityByEvent),
+    [filteredEvents, model.availabilityByEvent],
+  );
+
+  const myEventsSummary = useMemo(
+    () => calculateMyEventsSummary(
+      model.events,
+      model.starredEventIds,
+      model.manualEventIds,
+      model.attendanceByEventId,
+    ),
+    [model.events, model.starredEventIds, model.manualEventIds, model.attendanceByEventId],
   );
 
   const dateGroups = useMemo(() => {
@@ -415,11 +432,17 @@ function App() {
                   {view === "calendar"
                     ? `${calendarEvents.length} ${calendarMode === "week" ? "this week" : calendarMode === "day" ? "in day" : "in month view"} · ${filteredEvents.length} total`
                     : myEventsOnly
-                      ? `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"} in My Events`
+                      ? `${filteredEvents.length} shown`
                       : `${filteredEvents.length} ${filteredEvents.length === 1 ? "event" : "events"}`}
                 </span>
               </div>
             </div>
+            {view === "list" && !myEventsOnly && (
+              <DiscoverSummaryStrip summary={discoverSummary} />
+            )}
+            {view === "list" && myEventsOnly && (
+              <MyEventsDashboard summary={myEventsSummary} />
+            )}
             {view === "list" ? (
               filteredEvents.length ? <div className="events-list">
                 {dateGroups.map(([date, events]) => (
