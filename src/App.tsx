@@ -8,7 +8,7 @@ import { useClerk, useUser } from "@clerk/react";
 import { Link } from "wouter";
 import { basePath } from "./lib/clerk-config";
 import { useOpenWindow } from "./lib/useOpenWindow";
-import { getVisibleMinuteRange } from "./lib/calendar-grid";
+import { clipIntervalToCalendarDay, getVisibleMinuteRange } from "./lib/calendar-grid";
 import {
   atCalendarNoon,
   getCalendarViewDays,
@@ -188,10 +188,14 @@ function App() {
   );
 
   const calendarEvents = useMemo(() => {
-    const visibleDays = new Set(calendarDays.map((date) => dayKey(date)));
-    return filteredEvents.filter((event) =>
-      visibleDays.has(dayKey(safeDate(event.start), event.timeZone)),
-    );
+    return filteredEvents.filter((event) => calendarDays.some((date) =>
+      clipIntervalToCalendarDay(
+        safeDate(event.start),
+        safeDate(event.end),
+        date,
+        event.timeZone || "America/Los_Angeles",
+      ) !== null,
+    ));
   }, [filteredEvents, calendarDays]);
 
   const saveEvent = (event: EventItem) => {
@@ -594,9 +598,16 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, s
     : mode === "week"
       ? `${fmtDate(days[0], { month: "short", day: "numeric" })} – ${fmtDate(days[6], { month: "short", day: "numeric", year: "numeric" })}`
       : fmtDate(date, { month: "long", year: "numeric" });
-  const hourStart = 8;
-  const hourCount = 13;
+  const hourStart = 0;
+  const hourEnd = 24;
+  const hourCount = hourEnd - hourStart;
   const pxPerMinute = 48 / 60;
+  const calendarTimeScrollRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (mode !== "month" && calendarTimeScrollRef.current) {
+      calendarTimeScrollRef.current.scrollTop = hourStart * 48;
+    }
+  }, [date, mode, hourStart]);
   const columns = mode === "day"
     ? "48px minmax(240px, 1fr)"
     : "48px repeat(7, minmax(80px, 1fr))";
@@ -636,7 +647,9 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, s
         </div>
         <div className="calendar-month-grid">
           {days.map((day) => {
-            const dayEvents = events.filter((event) => dayKey(safeDate(event.start), event.timeZone) === dayKey(day));
+            const dayEvents = events.filter((event) =>
+              dayKey(safeDate(event.start), event.timeZone) === dayKey(day),
+            );
             const dayBusyCount = countCalendarBusyIntervalsForDay(day, busyIntervals);
             const currentMonth = day.getMonth() === date.getMonth() && day.getFullYear() === date.getFullYear();
             const today = dayKey(day) === dayKey(new Date());
@@ -682,66 +695,77 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, s
             <strong>{fmtDate(day, { day: "numeric" })}</strong>
           </div>)}
         </div>
-        <div className="time-grid" style={{ gridTemplateColumns: columns }}>
-          <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1, hourStart + index)))}</div>)}</div>
-          {days.map((day) => {
-            const blocks = getCalendarDayBlocks(
-              day,
-              events,
-              busyIntervals,
-              availability,
-              savedEventIds,
-              attendanceByEventId,
-            )
-              .flatMap((block) => {
-                const timeRange = getVisibleMinuteRange(block.start, block.end, block.zone, hourStart, hourStart + hourCount);
-                return timeRange ? [{ ...block, timeRange }] : [];
-              })
-              .sort((a, b) => a.start.getTime() - b.start.getTime());
-            const lanes: number[] = [];
-            const allocated = blocks.map((block) => {
-              let lane = lanes.findIndex((laneEnd) => laneEnd <= block.timeRange.visibleStartMinute);
-              if (lane < 0) lane = lanes.length;
-              lanes[lane] = block.timeRange.visibleEndMinute;
-              return { ...block, lane };
-            });
-            const laneCount = Math.max(1, lanes.length);
-            return <div className="calendar-day-col" key={day.toISOString()}>
-              {allocated.map((block) => {
-                const top = (block.timeRange.visibleStartMinute - hourStart * 60) * pxPerMinute;
-                const height = Math.max(18, (block.timeRange.visibleEndMinute - block.timeRange.visibleStartMinute) * pxPerMinute);
-                const busy = block.kind === "busy";
-                const attendanceStatus = block.kind === "event" ? block.attendanceStatus : null;
-                const accessibleLabel = block.kind === "busy"
-                  ? "Existing calendar commitment"
-                  : getCalendarEventAccessibleLabel(block.event, block.availability, block.attendanceStatus);
-                return <button key={block.key} type="button" className={`cal-block ${busy ? "busy" : `suggested ${block.availability === "conflict" ? "conflict" : ""}`}`}
-                  style={{ top, height, left: `calc(${block.lane} * (100% - 8px) / ${laneCount} + 4px)`, width: `calc((100% - 8px) / ${laneCount} - 3px)` }}
-                  onClick={() => { if (block.kind === "event") onEvent(block.event); }} disabled={busy}
-                  aria-label={accessibleLabel}
-                  title={block.kind === "event" && attendanceStatus
-                    ? `${block.event.title} · Attendance status: ${ATTENDANCE_STATUS_LABELS[attendanceStatus]}`
-                    : undefined}>
-                  <strong className={busy ? undefined : "calendar-event-title"}>
-                    {busy
-                      ? "Existing commitment"
-                      : <>
-                        {attendanceStatus && <CalendarAttendanceMarker status={attendanceStatus} />}
-                        <span className="calendar-event-title-text">{block.event.title}</span>
-                      </>}
-                  </strong>
-                  <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" }, block.zone)}{!busy && eventLocation(block.event) ? ` · ${eventLocation(block.event)}` : ""}</span>
-                </button>;
-              })}
-            </div>;
-          })}
+        <div className="calendar-time-scroll" ref={calendarTimeScrollRef}>
+          <div className="time-grid" style={{ gridTemplateColumns: columns }}>
+            <div className="hours-col">{Array.from({ length: hourCount }, (_, index) => <div className="hour-label" key={index}>{new Intl.DateTimeFormat("en-US", { hour: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(2024, 0, 1, hourStart + index)))}</div>)}</div>
+            {days.map((day) => {
+              const blocks = getCalendarDayBlocks(
+                day,
+                events,
+                busyIntervals,
+                availability,
+                savedEventIds,
+                attendanceByEventId,
+              )
+                .flatMap((block) => {
+                  const timeRange = getVisibleMinuteRange(
+                    block.start,
+                    block.end,
+                    block.zone,
+                    hourStart,
+                    hourStart + hourCount,
+                  );
+                  return timeRange ? [{ ...block, timeRange }] : [];
+                })
+                .sort((a, b) => a.start.getTime() - b.start.getTime());
+              const lanes: number[] = [];
+              const allocated = blocks.map((block) => {
+                let lane = lanes.findIndex((laneEnd) => laneEnd <= block.timeRange.visibleStartMinute);
+                if (lane < 0) lane = lanes.length;
+                lanes[lane] = block.timeRange.visibleEndMinute;
+                return { ...block, lane };
+              });
+              const laneCount = Math.max(1, lanes.length);
+              return <div className="calendar-day-col" key={day.toISOString()}>
+                {allocated.map((block) => {
+                  const top = (block.timeRange.visibleStartMinute - hourStart * 60) * pxPerMinute;
+                  const height = Math.max(
+                    18,
+                    (block.timeRange.visibleEndMinute - block.timeRange.visibleStartMinute) * pxPerMinute,
+                  );
+                  const busy = block.kind === "busy";
+                  const attendanceStatus = block.kind === "event" ? block.attendanceStatus : null;
+                  const accessibleLabel = block.kind === "busy"
+                    ? "Existing calendar commitment"
+                    : getCalendarEventAccessibleLabel(block.event, block.availability, block.attendanceStatus);
+                  return <button key={block.key} type="button" className={`cal-block ${busy ? "busy" : `suggested ${block.availability === "conflict" ? "conflict" : ""}`}`}
+                    style={{ top, height, left: `calc(${block.lane} * (100% - 8px) / ${laneCount} + 4px)`, width: `calc((100% - 8px) / ${laneCount} - 3px)` }}
+                    onClick={() => { if (block.kind === "event") onEvent(block.event); }} disabled={busy}
+                    aria-label={accessibleLabel}
+                    title={block.kind === "event" && attendanceStatus
+                      ? `${block.event.title} · Attendance status: ${ATTENDANCE_STATUS_LABELS[attendanceStatus]}`
+                      : undefined}>
+                    <strong className={busy ? undefined : "calendar-event-title"}>
+                      {busy
+                        ? "Existing commitment"
+                        : <>
+                          {attendanceStatus && <CalendarAttendanceMarker status={attendanceStatus} />}
+                          <span className="calendar-event-title-text">{block.event.title}</span>
+                        </>}
+                    </strong>
+                    <span>{fmtDate(block.start, { hour: "numeric", minute: "2-digit" }, block.zone)}{!busy && eventLocation(block.event) ? ` · ${eventLocation(block.event)}` : ""}</span>
+                  </button>;
+                })}
+              </div>;
+            })}
+          </div>
         </div>
       </div>
     )}
     <p className="calendar-foot">
       {mode === "month"
         ? "Select a date for Day view, or select an event for details."
-        : `Showing ${mode === "week" ? "this week" : "this day"}. Select an event for details; nothing is added automatically.`}
+        : `Showing ${mode === "week" ? "this week" : "this day"}. Scroll vertically to see earlier or later hours. Select an event for details; nothing is added automatically.`}
     </p>
   </div>;
 }
