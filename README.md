@@ -19,7 +19,7 @@ All ten current Discover fixtures are fictional demo events. The active event pr
 
 Sign-up, sign-in, and sign-out use Replit-managed Clerk. Private account operations are served by the Express/TypeScript API and persisted in PostgreSQL through Drizzle and `pg`. The server verifies Clerk sessions and scopes private records to the authenticated account. Signed-out demo discovery remains available; signed-out Star behavior is local to that browser. Legacy browser values are snapshotted and migrated without automatically deleting the original localStorage values.
 
-The Drizzle schema and relationship notes are in [`docs/schema.md`](docs/schema.md). The test requirements and RED/GREEN evidence are documented in [`docs/test-evidence/README.md`](docs/test-evidence/README.md).
+The Drizzle schema and relationship notes are in [`schema.md`](schema.md). The test requirements and RED/GREEN evidence are documented in [`docs/test-evidence/README.md`](docs/test-evidence/README.md).
 
 ### Calendar import and Shortcut prototype
 
@@ -63,5 +63,5 @@ The persistence integration tests require the development database. They use uni
 - `src/lib/useOpenWindow.ts`: client-side account-session state, localStorage preservation, API synchronization, and local calendar import.
 - `server/account-routes.ts` and `server/account-store.ts`: authenticated account API and user-scoped PostgreSQL access.
 - `server/db/schema.ts`: Drizzle schema declarations.
-- `docs/schema.md`: readable schema reference.
+- `schema.md`: readable schema reference.
 - `PLAN.md`: course plan and implementation status.
