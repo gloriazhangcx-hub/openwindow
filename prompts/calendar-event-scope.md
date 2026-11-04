@@ -24,4 +24,4 @@ Focused tests cover the default All Events scope, inclusion of manual events in 
 
 - GitHub Issue: #29
 - Feature branch: `feature/29-calendar-event-scope`
-- Pull request: to be linked after creation
+- Pull request: https://github.com/gloriazhangcx-hub/openwindow/pull/30
