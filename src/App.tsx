@@ -16,6 +16,11 @@ import {
   type CalendarMode,
 } from "./lib/calendar-views";
 import { findNearestUpcomingEvent } from "./lib/saved-events";
+import {
+  DEFAULT_CALENDAR_EVENT_SCOPE,
+  filterCalendarEvents,
+  type CalendarEventScope,
+} from "./lib/calendar-event-scope";
 import { filterEvents } from "./lib/event-filtering";
 import { sortEventsByStart, type EventSortOrder } from "./lib/event-sorting";
 import { calculateDiscoverSummary, calculateMyEventsSummary } from "./lib/dashboard";
@@ -129,6 +134,9 @@ function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(INITIAL_WORKSPACE_TAB);
   const view: View = getEventView(activeTab);
   const myEventsOnly = activeTab === "my-events";
+  const [calendarEventScope, setCalendarEventScope] = useState<CalendarEventScope>(
+    DEFAULT_CALENDAR_EVENT_SCOPE,
+  );
   const [calendarMode, setCalendarMode] = useState<CalendarMode>(initialCalendarMode);
   const [calendarDate, setCalendarDate] = useState(initialCalendarDate);
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
@@ -170,18 +178,25 @@ function App() {
       : model.events.filter((event) => event.source !== "Manual");
   }, [model.events, myEventsOnly, view]);
 
-  const filteredEvents = useMemo(() => filterEvents(eventsForView, {
-    preferences: model.preferences,
-    availabilityByEvent: model.availabilityByEvent,
-    attendanceByEventId: model.attendanceByEventId,
-    starredEventIds: model.starredEventIds,
-    selectedTopics,
-    selectedFormats,
-    availabilityFilter,
-    searchQuery,
-    attendanceStatusFilter,
-    myEventsOnly,
-  }), [eventsForView, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.starredEventIds, selectedTopics, selectedFormats, availabilityFilter, searchQuery, attendanceStatusFilter, myEventsOnly]);
+  const filteredEvents = useMemo(() => {
+    const options = {
+      preferences: model.preferences,
+      availabilityByEvent: model.availabilityByEvent,
+      attendanceByEventId: model.attendanceByEventId,
+      starredEventIds: model.starredEventIds,
+      selectedTopics,
+      selectedFormats,
+      availabilityFilter,
+      searchQuery,
+    };
+    return view === "calendar"
+      ? filterCalendarEvents(eventsForView, options, calendarEventScope)
+      : filterEvents(eventsForView, {
+        ...options,
+        attendanceStatusFilter,
+        myEventsOnly,
+      });
+  }, [eventsForView, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.starredEventIds, selectedTopics, selectedFormats, availabilityFilter, searchQuery, attendanceStatusFilter, myEventsOnly, view, calendarEventScope]);
 
   const listEvents = useMemo(
     () => view === "list" && !myEventsOnly
@@ -398,6 +413,19 @@ function App() {
                     </select>
                   </label>
                 )}
+                {view === "calendar" && (
+                  <label className="calendar-scope-control">
+                    <span>Show</span>
+                    <select
+                      aria-label="Calendar event scope"
+                      value={calendarEventScope}
+                      onChange={(event) => setCalendarEventScope(event.target.value as CalendarEventScope)}
+                    >
+                      <option value="all">All Events</option>
+                      <option value="my-events">My Events Only</option>
+                    </select>
+                  </label>
+                )}
                 {myEventsOnly && (
                   <label className="attendance-filter">
                     <span>Status</span>
@@ -474,7 +502,11 @@ function App() {
               {calendarEvents.length === 0 && (
                 <div className="calendar-empty-note" role="status">
                   <div>
-                    <strong>No suggested events match this calendar view.</strong>
+                    <strong>
+                      {calendarEventScope === "my-events"
+                        ? "No events in My Events match this calendar view."
+                        : "No events match this calendar view."}
+                    </strong>
                     <p>Your personal calendar commitments are still shown. Adjust your filters or search for another event.</p>
                   </div>
                   {searchQuery.trim() && (
@@ -508,7 +540,7 @@ function App() {
         availability={model.availabilityByEvent[activeEvent.id] ?? "unknown"}
         starred={model.starredEventIds.includes(activeEvent.id)}
         onStar={activeEvent.source === "Manual" ? undefined : () => starEvent(activeEvent)}
-        attendance={activeEvent.source === "Manual" || (myEventsOnly && model.starredEventIds.includes(activeEvent.id)) ? {
+        attendance={activeEvent.source === "Manual" || model.starredEventIds.includes(activeEvent.id) ? {
           eventId: activeEvent.id,
           eventTitle: activeEvent.title,
           status: model.attendanceByEventId[activeEvent.id] ?? "interested",
