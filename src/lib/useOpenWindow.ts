@@ -116,8 +116,10 @@ export interface OpenWindowModel {
   events: EventItem[];
   busyIntervals: BusyInterval[] | null;
   busyOrigin: BusyOrigin;
-  savedEventIds: string[];
+  starredEventIds: string[];
+  starredEvents: EventItem[];
   manualEventIds: string[];
+  manualEvents: EventItem[];
   attendanceByEventId: Record<string, AttendanceStatus>;
   preferences: Preferences;
   syncStatus: CalendarSyncStatus;
@@ -125,7 +127,7 @@ export interface OpenWindowModel {
   accountReady: boolean;
   isAuthenticated: boolean;
   availabilityByEvent: Record<string, ReturnType<typeof getAvailability>>;
-  saveEvent: (event: EventItem) => void;
+  setStarredEvent: (event: EventItem, starred: boolean) => boolean;
   updateAttendanceStatus: (eventId: string, status: AttendanceStatus) => void;
   createManualEvent: (input: ManualEventInput) => Promise<EventItem>;
   updateManualEvent: (eventId: string, input: ManualEventInput) => Promise<EventItem>;
@@ -158,14 +160,14 @@ export function useOpenWindow(): OpenWindowModel {
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(
     initialLocalAllowed ? initialBusy.lastSyncedAt : null,
   );
-  const [savedEventIds, setSavedEventIds] = useState<string[]>(() =>
+  const [starredEventIds, setStarredEventIds] = useState<string[]>(() =>
     initialLocalAllowed ? readStored<string[]>(STORAGE_KEYS.saved, []) : [],
   );
+  const [starredEventSnapshots, setStarredEventSnapshots] = useState<EventItem[]>([]);
   const [attendanceByEventId, setAttendanceByEventId] = useState<Record<string, AttendanceStatus>>({});
   const [preferences, setPreferences] = useState<Preferences>(
     initialLocalAllowed ? readPreferences() : DEFAULT_PREFERENCES,
   );
-  const [savedEventSnapshots, setSavedEventSnapshots] = useState<EventItem[]>([]);
   const [manualEventSnapshots, setManualEventSnapshots] = useState<EventItem[]>([]);
   const [persistenceStatus, setPersistenceStatus] = useState<PersistenceStatus>("local");
   const [loadedUserId, setLoadedUserId] = useState<string | null>(null);
@@ -182,7 +184,7 @@ export function useOpenWindow(): OpenWindowModel {
     if (!isSignedIn || !userId) {
       attemptedUserRef.current = null;
       setLoadedUserId(null);
-      setSavedEventSnapshots([]);
+      setStarredEventSnapshots([]);
       setManualEventSnapshots([]);
       setAttendanceByEventId({});
       setPersistenceStatus("local");
@@ -193,13 +195,13 @@ export function useOpenWindow(): OpenWindowModel {
         getLocalDataOwner(window.localStorage),
         getLegacyMigrationOwner(window.localStorage),
       )) {
-        setSavedEventIds([]);
+        setStarredEventIds([]);
         setPreferences(DEFAULT_PREFERENCES);
         setBusyIntervals(demoBusyIntervals);
         setBusyOrigin("Demo sample");
         setLastSyncedAt(null);
       } else {
-        setSavedEventIds(readStored<string[]>(STORAGE_KEYS.saved, []));
+        setStarredEventIds(readStored<string[]>(STORAGE_KEYS.saved, []));
         setPreferences(readPreferences());
         const localBusy = readBusyState();
         setBusyIntervals(localBusy.intervals);
@@ -236,8 +238,9 @@ export function useOpenWindow(): OpenWindowModel {
 
       const account = await accountApi.getData();
       if (cancelled) return;
-      setSavedEventIds(account.savedEventIds);
-      setSavedEventSnapshots(account.savedEvents);
+      const accountStarredIds = account.starredEvents.map((event) => event.id);
+      setStarredEventIds(accountStarredIds);
+      setStarredEventSnapshots(account.starredEvents);
       setManualEventSnapshots(account.manualEvents);
       setAttendanceByEventId(account.attendanceByEventId);
       setPreferences(account.preferences ?? (canUseThisUserLocalState ? readPreferences() : DEFAULT_PREFERENCES));
@@ -265,21 +268,19 @@ export function useOpenWindow(): OpenWindowModel {
     getLocalDataOwner(window.localStorage),
     getLegacyMigrationOwner(window.localStorage),
   );
-  const visibleSavedIds = accountReady ? savedEventIds : [];
+  const visibleStarredIds = accountReady ? starredEventIds : [];
   const visibleManualEvents = accountReady ? manualEventSnapshots : [];
   const visibleManualIds = visibleManualEvents.map((event) => event.id);
   const visibleAttendanceByEventId = accountReady ? attendanceByEventId : {};
   const visiblePreferences = accountReady ? preferences : DEFAULT_PREFERENCES;
   const visibleBusyIntervals = accountReady ? busyIntervals : demoBusyIntervals;
-  const visibleSavedSnapshots = accountReady ? savedEventSnapshots : [];
+  const visibleStarredSnapshots = accountReady ? starredEventSnapshots : [];
   const displayEvents = useMemo(() => {
     const byId = new Map(events.map((event) => [event.id, event]));
-    visibleSavedSnapshots.forEach((event) => {
-      if (!byId.has(event.id)) byId.set(event.id, event);
-    });
+    visibleStarredSnapshots.forEach((event) => byId.set(event.id, event));
     visibleManualEvents.forEach((event) => byId.set(event.id, event));
     return [...byId.values()];
-  }, [events, visibleSavedSnapshots, visibleManualEvents]);
+  }, [events, visibleStarredSnapshots, visibleManualEvents]);
 
   const syncWrite = useCallback((operation: () => Promise<unknown>) => {
     const expectedUserId = activeUserRef.current;
@@ -316,19 +317,23 @@ export function useOpenWindow(): OpenWindowModel {
     return pending;
   }, [accountReady, isSignedIn]);
 
-  const saveEvent = useCallback((event: EventItem) => {
-    if (event.source === "Manual") return;
-    const wasSaved = visibleSavedIds.includes(event.id);
-    const nextSaved = !wasSaved;
-    const nextIds = nextSaved
-      ? [...visibleSavedIds, event.id]
-      : visibleSavedIds.filter((id) => id !== event.id);
-    setSavedEventIds(nextIds);
-    setSavedEventSnapshots((previous) => nextSaved
-      ? [...previous.filter((item) => item.id !== event.id), event]
-      : previous.filter((item) => item.id !== event.id));
+  const setStarredEvent = useCallback((event: EventItem, starred: boolean) => {
+    if (event.source === "Manual") return false;
+    if (isSignedIn && !accountReady) return false;
+    const nextIds = starred
+      ? [...new Set([...visibleStarredIds, event.id])]
+      : visibleStarredIds.filter((id) => id !== event.id);
+    if (!writeLegacyValue(STORAGE_KEYS.saved, JSON.stringify(nextIds), isSignedIn, userId ?? null)) {
+      return false;
+    }
+    setStarredEventIds(nextIds);
+    if (isSignedIn) {
+      setStarredEventSnapshots((previous) => starred
+        ? [...previous.filter((item) => item.id !== event.id), event]
+        : previous.filter((item) => item.id !== event.id));
+    }
     setAttendanceByEventId((previous) => {
-      if (nextSaved) {
+      if (starred) {
         return previous[event.id]
           ? previous
           : { ...previous, [event.id]: "interested" };
@@ -336,18 +341,18 @@ export function useOpenWindow(): OpenWindowModel {
       const { [event.id]: _removed, ...remaining } = previous;
       return remaining;
     });
-    writeLegacyValue(STORAGE_KEYS.saved, JSON.stringify(nextIds), isSignedIn, userId ?? null);
-    if (isSignedIn) syncWrite(() => accountApi.setSavedEvent(event, nextSaved));
-  }, [visibleSavedIds, isSignedIn, userId, syncWrite]);
+    if (isSignedIn) syncWrite(() => accountApi.setStarredEvent(event, starred));
+    return true;
+  }, [visibleStarredIds, isSignedIn, userId, accountReady, syncWrite]);
 
   const updateAttendanceStatus = useCallback((eventId: string, status: AttendanceStatus) => {
     const isManual = visibleManualIds.includes(eventId);
-    if (!isSignedIn || !accountReady || (!visibleSavedIds.includes(eventId) && !isManual)) return;
+    if (!isSignedIn || !accountReady || (!visibleStarredIds.includes(eventId) && !isManual)) return;
     setAttendanceByEventId((previous) => ({ ...previous, [eventId]: status }));
     syncWrite(() => isManual
       ? accountApi.updateManualEventAttendance(eventId.slice("manual:".length), status)
       : accountApi.updateAttendanceStatus(eventId, status));
-  }, [isSignedIn, accountReady, visibleSavedIds, visibleManualIds, syncWrite]);
+  }, [isSignedIn, accountReady, visibleStarredIds, visibleManualIds, syncWrite]);
 
   const createManualEvent = useCallback(async (input: ManualEventInput) => {
     const expectedUserId = activeUserRef.current;
@@ -438,16 +443,25 @@ export function useOpenWindow(): OpenWindowModel {
   );
 
   const availabilityByEvent = useMemo(
-    () => Object.fromEntries(displayEvents.map((event) => [event.id, getAvailability(event, visibleBusyIntervals)])),
-    [displayEvents, visibleBusyIntervals],
+    () => {
+      const allEvents = new Map(displayEvents.map((event) => [event.id, event]));
+      visibleStarredSnapshots.forEach((event) => allEvents.set(event.id, event));
+      return Object.fromEntries([...allEvents.values()].map((event) => [
+        event.id,
+        getAvailability(event, visibleBusyIntervals),
+      ]));
+    },
+    [displayEvents, visibleStarredSnapshots, visibleBusyIntervals],
   );
 
   return {
     events: displayEvents,
     busyIntervals: visibleBusyIntervals,
     busyOrigin: accountReady ? busyOrigin : "Demo sample",
-    savedEventIds: visibleSavedIds,
+    starredEventIds: visibleStarredIds,
+    starredEvents: visibleStarredSnapshots,
     manualEventIds: visibleManualIds,
+    manualEvents: visibleManualEvents,
     attendanceByEventId: visibleAttendanceByEventId,
     preferences: visiblePreferences,
     syncStatus,
@@ -455,7 +469,7 @@ export function useOpenWindow(): OpenWindowModel {
     accountReady,
     isAuthenticated: Boolean(isSignedIn),
     availabilityByEvent,
-    saveEvent,
+    setStarredEvent,
     updateAttendanceStatus,
     createManualEvent,
     updateManualEvent,

@@ -3,18 +3,18 @@ type EventTimeCandidate = {
   start: string;
 };
 
-export function findNearestUpcomingSavedEvent<T extends EventTimeCandidate>(
+export function findNearestUpcomingEvent<T extends EventTimeCandidate>(
   events: readonly T[],
-  savedEventIds: readonly string[],
+  starredEventIds: readonly string[],
   now = Date.now(),
 ): T | undefined {
-  const savedIds = new Set(savedEventIds);
+  const starredIds = new Set(starredEventIds);
   let nearest: T | undefined;
   let nearestStart = Number.POSITIVE_INFINITY;
 
   for (const event of events) {
     const start = Date.parse(event.start);
-    if (!savedIds.has(event.id) || !Number.isFinite(start) || start <= now) continue;
+    if (!starredIds.has(event.id) || !Number.isFinite(start) || start <= now) continue;
     if (start < nearestStart) {
       nearest = event;
       nearestStart = start;

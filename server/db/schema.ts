@@ -68,10 +68,18 @@ export const stars = pgTable(
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     eventId: uuid("event_id").notNull().references(() => events.id, { onDelete: "cascade" }),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    attendanceStatus: varchar("attendance_status", { length: 32 })
+      .$type<AttendanceStatus>()
+      .notNull()
+      .default("interested"),
   },
   (table) => [
     primaryKey({ columns: [table.userId, table.eventId] }),
     index("stars_user_id_idx").on(table.userId),
+    check(
+      "stars_attendance_status_check",
+      sql`${table.attendanceStatus} in ('interested', 'planning_to_attend', 'registered')`,
+    ),
   ],
 );
 

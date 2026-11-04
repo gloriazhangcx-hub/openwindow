@@ -31,11 +31,11 @@ export type CalendarDayBlock = CalendarEventBlock | CalendarBusyBlock;
 
 export function getCalendarAttendanceStatus(
   eventId: string,
-  savedEventIds: string[],
+  starredEventIds: string[],
   attendanceByEventId: Record<string, AttendanceStatus>,
   isManual = false,
 ): AttendanceStatus | null {
-  if (!isManual && !savedEventIds.includes(eventId)) return null;
+  if (!isManual && !starredEventIds.includes(eventId)) return null;
   return attendanceByEventId[eventId] ?? "interested";
 }
 
@@ -62,7 +62,7 @@ export function getCalendarDayBlocks(
   events: EventItem[],
   busyIntervals: BusyInterval[] | null,
   availabilityByEventId: Record<string, Availability>,
-  savedEventIds: string[],
+  starredEventIds: string[],
   attendanceByEventId: Record<string, AttendanceStatus>,
 ): CalendarDayBlock[] {
   const eventBlocks: CalendarEventBlock[] = events.flatMap((event) => {
@@ -83,7 +83,7 @@ export function getCalendarDayBlocks(
       availability: availabilityByEventId[event.id] ?? "unknown",
       attendanceStatus: getCalendarAttendanceStatus(
         event.id,
-        savedEventIds,
+        starredEventIds,
         attendanceByEventId,
         event.source === "Manual",
       ),

@@ -30,12 +30,12 @@ test("event filters combine multi-selects and sort matching events by start time
       preferences: { ...DEFAULT_PREFERENCES, cities: ["Berkeley"], dateHorizonDays: 14 },
       availabilityByEvent: { later: "conflict", earlier: "conflict", format: "conflict" },
       attendanceByEventId: {},
-      savedEventIds: ["later", "earlier"],
+      starredEventIds: ["later", "earlier"],
       selectedTopics: ["AI & Tech", "Startups"],
       selectedFormats: ["Workshop", "Hackathon"],
       availabilityFilter: "conflict",
       attendanceStatusFilter: "all",
-      savedOnly: true,
+      myEventsOnly: true,
       now,
     },
   );
@@ -52,12 +52,12 @@ test("empty topic and format selections allow all matching availability states",
       preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
       availabilityByEvent: { available: "available", unknown: "unknown" },
       attendanceByEventId: {},
-      savedEventIds: [],
+      starredEventIds: [],
       selectedTopics: [],
       selectedFormats: [],
       availabilityFilter: "all",
       attendanceStatusFilter: "all",
-      savedOnly: false,
+      myEventsOnly: false,
       now,
     },
   );
@@ -81,12 +81,12 @@ test("search matches every case-insensitive term in event titles or descriptions
     preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
     availabilityByEvent: {},
     attendanceByEventId: {},
-    savedEventIds: [],
+    starredEventIds: [],
     selectedTopics: [],
     selectedFormats: [],
     availabilityFilter: "all",
     attendanceStatusFilter: "all",
-    savedOnly: false,
+    myEventsOnly: false,
     searchQuery: "  FOUNDER   workshop ",
     now,
   });
@@ -96,12 +96,12 @@ test("search matches every case-insensitive term in event titles or descriptions
     preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
     availabilityByEvent: {},
     attendanceByEventId: {},
-    savedEventIds: [],
+    starredEventIds: [],
     selectedTopics: [],
     selectedFormats: [],
     availabilityFilter: "all",
     attendanceStatusFilter: "all",
-    savedOnly: false,
+    myEventsOnly: false,
     searchQuery: "openwindow meetup",
     now,
   });
@@ -135,12 +135,12 @@ test("search combines with existing filters, and a cleared query preserves their
       "no-search": "conflict" as const,
     },
     attendanceByEventId: {},
-    savedEventIds: [],
+    starredEventIds: [],
     selectedTopics: ["Startups"],
     selectedFormats: ["Networking"],
     availabilityFilter: "conflict",
     attendanceStatusFilter: "all",
-    savedOnly: false,
+    myEventsOnly: false,
     now,
   };
   const matchingResults = filterEvents(events, { ...options, searchQuery: "open founders" });
@@ -164,12 +164,12 @@ test("attendance filters apply only in My Events and default older saves to Inte
       planning: "planning_to_attend" as const,
       registered: "registered" as const,
     },
-    savedEventIds: ["interested", "planning", "registered"],
+    starredEventIds: ["interested", "planning", "registered"],
     selectedTopics: [],
     selectedFormats: [],
     availabilityFilter: "all" as const,
     attendanceStatusFilter: "interested" as const,
-    savedOnly: true,
+    myEventsOnly: true,
     now,
   };
 
@@ -207,14 +207,59 @@ test("attendance status filters do not change Full Discover results", () => {
     preferences: { ...DEFAULT_PREFERENCES, cities: [], dateHorizonDays: 14 },
     availabilityByEvent: {},
     attendanceByEventId: { registered: "registered" },
-    savedEventIds: [],
+    starredEventIds: [],
     selectedTopics: [],
     selectedFormats: [],
     availabilityFilter: "all",
     attendanceStatusFilter: "registered",
-    savedOnly: false,
+    myEventsOnly: false,
     now,
   });
 
   assert.deepEqual(result.map((event) => event.id), ["interested", "registered"]);
+});
+
+test("My Events shows starred suggestions and manual events without discovery defaults", () => {
+  const starred = eventAt("starred", 25, { city: "New York" });
+  const unstarred = eventAt("unstarred", 1);
+  const manual = eventAt("manual", 30, { source: "Manual", city: "" });
+  const options: EventFilterOptions = {
+    preferences: { ...DEFAULT_PREFERENCES, cities: ["Berkeley"], dateHorizonDays: 14 },
+    availabilityByEvent: {},
+    attendanceByEventId: {},
+    starredEventIds: ["starred"],
+    selectedTopics: [],
+    selectedFormats: [],
+    availabilityFilter: "all",
+    attendanceStatusFilter: "all",
+    myEventsOnly: true,
+    now,
+  };
+
+  assert.deepEqual(
+    filterEvents([unstarred, starred, manual], options).map((event) => event.id),
+    ["starred", "manual"],
+  );
+  assert.deepEqual(
+    filterEvents([unstarred, starred, manual], { ...options, myEventsOnly: false })
+      .map((event) => event.id),
+    ["unstarred", "manual"],
+  );
+});
+
+test("starred events are not hidden by the discovery city or date-horizon defaults", () => {
+  const starred = eventAt("starred-outside-defaults", 25, { city: "New York" });
+  const options: EventFilterOptions = {
+    preferences: { ...DEFAULT_PREFERENCES, cities: ["Berkeley"], dateHorizonDays: 14 },
+    availabilityByEvent: {},
+    attendanceByEventId: {},
+    starredEventIds: [starred.id],
+    selectedTopics: [],
+    selectedFormats: [],
+    availabilityFilter: "all",
+    attendanceStatusFilter: "all",
+    myEventsOnly: true,
+    now,
+  };
+  assert.deepEqual(filterEvents([starred], options).map((event) => event.id), [starred.id]);
 });

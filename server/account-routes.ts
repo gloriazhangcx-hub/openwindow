@@ -148,21 +148,25 @@ export function createAccountRouter(store: AccountStore, resolveUserId: UserIdRe
     }
   });
 
-  router.put("/saved-events", async (request, response) => {
-    if (!record(request.body) || typeof request.body.saved !== "boolean") {
-      return response.status(400).json({ error: "Expected an event snapshot and saved boolean." });
+  router.put("/stars", async (request, response) => {
+    if (
+      !record(request.body) ||
+      Object.keys(request.body).some((key) => !["event", "starred"].includes(key)) ||
+      typeof request.body.starred !== "boolean"
+    ) {
+      return response.status(400).json({ error: "Expected an event snapshot and starred boolean." });
     }
     const event = parseEventItem(request.body.event);
     if (!event) return response.status(400).json({ error: "Event snapshot is invalid." });
     try {
-      await store.setSavedEvent(accountId(response), event, request.body.saved);
-      return response.json({ saved: request.body.saved });
+      await store.setStarredEvent(accountId(response), event, request.body.starred);
+      return response.json({ starred: request.body.starred });
     } catch (error) {
       return sendFailure(response, error);
     }
   });
 
-  router.put("/saved-events/attendance", async (request, response) => {
+  router.put("/stars/attendance", async (request, response) => {
     if (
       !record(request.body) ||
       Object.keys(request.body).some((key) => !["eventId", "status"].includes(key)) ||
@@ -179,8 +183,8 @@ export function createAccountRouter(store: AccountStore, resolveUserId: UserIdRe
         request.body.eventId,
         request.body.status as AttendanceStatus,
       );
-      if (!updated) return response.status(404).json({ error: "Saved event was not found." });
-      return response.json({ saved: true, eventId: request.body.eventId, status: request.body.status });
+      if (!updated) return response.status(404).json({ error: "Starred event was not found." });
+      return response.json({ updated: true, eventId: request.body.eventId, status: request.body.status });
     } catch (error) {
       return sendFailure(response, error);
     }
