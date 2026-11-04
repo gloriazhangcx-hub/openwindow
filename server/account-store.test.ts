@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { test } from "node:test";
 import { DEFAULT_PREFERENCES, demoEvents } from "../src/data/events";
+import { calculateMyEventsSummary } from "../src/lib/dashboard";
 import {
   busyIntervals,
   events,
@@ -14,9 +15,9 @@ import {
   users,
 } from "./db/schema";
 import type { LegacyRawValues } from "./account-store";
-import type { ManualEventInput } from "../src/types";
+import type { EventItem, ManualEventInput } from "../src/types";
 
-test("PostgreSQL account storage is isolated and local migration is idempotent", {
+test("PostgreSQL account storage isolates users and local migration is idempotent", {
   skip: !process.env.DATABASE_URL,
 }, async () => {
   const [
@@ -323,5 +324,76 @@ test("public demo mode can start without private database configuration", async 
   } finally {
     if (configuredDatabaseUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = configuredDatabaseUrl;
+  }
+});
+
+test("My Events dashboard count comes from the user's persisted account records", {
+  skip: !process.env.DATABASE_URL,
+}, async () => {
+  const [
+    { getDatabase, closeDatabase },
+    { createAccountStore },
+  ] = await Promise.all([
+    import("./db/client"),
+    import("./account-store"),
+  ]);
+  const db = getDatabase();
+  const store = createAccountStore(db);
+  const clerkUserId = `test_dashboard_${randomUUID()}`;
+  const makeCandidate = (title: string): EventItem => ({
+    id: `course-test:${randomUUID()}`,
+    title,
+    description: "Temporary deterministic course acceptance-test data.",
+    start: "2030-06-10T18:00:00-07:00",
+    end: "2030-06-10T19:00:00-07:00",
+    timeZone: "America/Los_Angeles",
+    city: "Oakland",
+    venue: "Course test venue",
+    topics: ["AI & Tech"],
+    formats: ["Workshop"],
+    source: "Demo",
+    lumaUrl: "",
+  });
+  const firstStar = makeCandidate("Course test starred event one");
+  const secondStar = makeCandidate("Course test starred event two");
+  const unstarred = makeCandidate("Course test unstarred event");
+
+  const manualInput: ManualEventInput = {
+    title: "Course test manual event",
+    description: "Created only for the dashboard acceptance test.",
+    start: "2030-06-10T18:00:00-07:00",
+    end: "2030-06-10T19:00:00-07:00",
+    timeZone: "America/Los_Angeles",
+    location: "Test location",
+    eventUrl: "https://example.com/course-test",
+    topics: ["AI & Tech"],
+    formats: ["Workshop"],
+  };
+
+  try {
+    await store.setStarredEvent(clerkUserId, firstStar, true);
+    await store.setStarredEvent(clerkUserId, secondStar, true);
+    await store.createManualEvent(clerkUserId, manualInput);
+
+    // Read the account back from PostgreSQL; the summary is not built from demo totals.
+    const account = await store.readAccount(clerkUserId);
+    const summary = calculateMyEventsSummary(
+      [...account.starredEvents, unstarred, ...account.manualEvents],
+      account.starredEvents.map((event) => event.id),
+      account.manualEvents.map((event) => event.id),
+      account.attendanceByEventId,
+    );
+
+    assert.deepEqual(
+      {
+        totalEvents: summary.totalEvents,
+        fromDiscover: summary.fromDiscover,
+        addedByMe: summary.addedByMe,
+      },
+      { totalEvents: 3, fromDiscover: 2, addedByMe: 1 },
+    );
+  } finally {
+    await db.delete(users).where(eq(users.clerkUserId, clerkUserId));
+    await closeDatabase();
   }
 });

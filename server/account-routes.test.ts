@@ -161,6 +161,46 @@ test("private account routes require a verified session identity", async () => {
   }
 });
 
+test("User B cannot read User A's private event list by supplying User A's ID", async () => {
+  const store = new MemoryStore();
+  const aliceEvent = demoEvents[0];
+  const bobEvent = demoEvents[1];
+  await store.setStarredEvent("alice", aliceEvent, true);
+  await store.setStarredEvent("bob", bobEvent, true);
+
+  const app = express();
+  app.use("/api/account", createAccountRouter(
+    store,
+    (request) => request.header("x-test-session") ?? null,
+  ));
+  const server = createServer(app);
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const base = `http://127.0.0.1:${address.port}/api/account`;
+
+  try {
+    const aliceResponse = await fetch(`${base}/data`, {
+      headers: { "x-test-session": "alice" },
+    });
+    const bobResponse = await fetch(`${base}/data?userId=alice`, {
+      headers: { "x-test-session": "bob" },
+    });
+    const aliceData = await aliceResponse.json() as AccountData;
+    const bobData = await bobResponse.json() as AccountData;
+
+    assert.equal(aliceResponse.status, 200);
+    assert.equal(bobResponse.status, 200);
+    assert.deepEqual(aliceData.starredEvents.map((event) => event.id), [aliceEvent.id]);
+    assert.deepEqual(bobData.starredEvents.map((event) => event.id), [bobEvent.id]);
+    assert.equal(bobData.starredEvents.some((event) => event.id === aliceEvent.id), false);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
+});
+
 test("request-supplied user IDs cannot redirect private writes to another account", async () => {
   const store = new MemoryStore();
   const app = express();
