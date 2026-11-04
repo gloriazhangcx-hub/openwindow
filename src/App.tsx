@@ -601,13 +601,14 @@ function CalendarView({ date, mode, days, events, busyIntervals, availability, s
   const hourStart = 0;
   const hourEnd = 24;
   const hourCount = hourEnd - hourStart;
+  const defaultScrollHour = 8;
   const pxPerMinute = 48 / 60;
   const calendarTimeScrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (mode !== "month" && calendarTimeScrollRef.current) {
-      calendarTimeScrollRef.current.scrollTop = hourStart * 48;
+      calendarTimeScrollRef.current.scrollTop = defaultScrollHour * 48;
     }
-  }, [date, mode, hourStart]);
+  }, [date, mode, defaultScrollHour]);
   const columns = mode === "day"
     ? "48px minmax(240px, 1fr)"
     : "48px repeat(7, minmax(80px, 1fr))";
