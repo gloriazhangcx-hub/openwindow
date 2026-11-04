@@ -71,17 +71,16 @@ h1,h2,h3,p { margin-top:0; }
 .filter-note { font-size:10px;color:#929c94;line-height:1.5;margin:14px 0 0; }
 .main-panel { min-height:560px;overflow:hidden; }
 .panel-toolbar { min-height:62px;padding:12px 18px;border-bottom:1px solid #ece7f1;display:flex;align-items:center;justify-content:space-between;gap:16px; }
-.view-switch { display:inline-flex;padding:3px;background:#f0ecf7;border-radius:9px;gap:2px; }
-.view-switch button { border:0;background:transparent;border-radius:7px;padding:8px 12px;display:flex;align-items:center;gap:7px;color:#766f84;font-size:12px;font-weight:600;cursor:pointer; }
+.view-switch { display:inline-flex;flex:0 0 auto;padding:3px;background:#f0ecf7;border-radius:9px;gap:2px; }
+.view-switch button { flex:1 1 auto;border:0;background:transparent;border-radius:7px;padding:8px 12px;display:flex;align-items:center;justify-content:center;gap:7px;color:#766f84;font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer; }
 .view-switch button.selected { background:#fffefa;color:#4c387e;box-shadow:0 1px 4px #392b6017; }
+.view-switch button:focus-visible { outline:2px solid #8b75c3;outline-offset:2px; }
+.view-tab-count { display:inline-flex;min-width:18px;height:18px;align-items:center;justify-content:center;border-radius:999px;background:#eee9f6;color:#514080;font-size:10px;font-weight:700; }
 .toolbar-right { display:flex;align-items:center;gap:10px; }
 .list-sort-control { display:flex;align-items:center;gap:5px;color:#80798d;font-size:10px;font-weight:600;white-space:nowrap; }
 .list-sort-control select { max-width:178px;height:30px;border:1px solid #e4deeb;background:#fbf9fd;border-radius:7px;padding:0 8px;color:#4b3a74;font-size:10px; }
 .attendance-filter { display:flex;align-items:center;gap:5px;color:#80798d;font-size:10px;font-weight:600;white-space:nowrap; }
 .attendance-filter select { max-width:160px;height:30px;border:1px solid #e4deeb;background:#fbf9fd;border-radius:7px;padding:0 8px;color:#4b3a74;font-size:10px; }
-.my-events-toggle { display:flex;align-items:center;gap:6px;background:none;border:0;color:#718078;font-size:12px;font-weight:600;cursor:pointer;padding:8px;border-radius:8px; }
-.my-events-toggle:hover,.my-events-toggle.active { color:#b96353;background:#f7eae4; }
-.my-events-return { white-space:nowrap; }
 .count-label { font-size:11px;color:#939c94;white-space:nowrap; }
 .discover-summary { display:flex;align-items:center;gap:14px;min-height:48px;padding:8px 20px;border-bottom:1px solid #ece7f1; }
 .discover-summary-stat { display:flex;align-items:baseline;gap:7px;padding-right:14px;border-right:1px solid #ece7f1;color:#80798d;font-size:10px;white-space:nowrap; }
@@ -152,6 +151,7 @@ h1,h2,h3,p { margin-top:0; }
 .button.primary:hover { background:#40316f;transform:translateY(-1px);box-shadow:0 5px 15px #51408030; }
 .button.secondary { background:#f6f2fa;border:1px solid #e0d8ed;color:#514080; }
 .button.secondary:hover { background:#eee9f6; }
+.luma-event-button { text-decoration:none;white-space:nowrap; }
 .button.danger { background:#fbefec;border:1px solid #efd4cd;color:#b35e50; }
 .footer-note { display:flex;justify-content:space-between;gap:16px;margin-top:17px;color:#929c93;font-size:10px; }
 .calendar-wrap { padding:18px;overflow-x:auto; }
@@ -274,9 +274,11 @@ h1,h2,h3,p { margin-top:0; }
  .filter-section.search-filter-section {padding:0 0 12px}
  .calendar-empty-note {align-items:flex-start;flex-direction:column}
  .main-panel {border-radius:13px}
- .panel-toolbar {padding:12px;align-items:flex-start}
- .view-switch button {padding:8px 9px;font-size:11px}
- .toolbar-right {gap:4px;flex-direction:column;align-items:flex-end}
+  .panel-toolbar {padding:12px;align-items:stretch;flex-direction:column;gap:10px}
+  .view-switch {width:100%}
+  .view-switch button {padding:8px 4px;font-size:10px;gap:4px}
+  .view-tab-count {min-width:16px;height:16px;font-size:9px}
+  .toolbar-right {width:100%;gap:7px;flex-direction:row;align-items:center;justify-content:space-between;flex-wrap:wrap}
   .list-sort-control {font-size:9px}
   .list-sort-control select {max-width:150px;font-size:9px;padding:0 6px}
  .count-label {font-size:9px}
@@ -326,6 +328,7 @@ h1,h2,h3,p { margin-top:0; }
 .add-event-button { white-space:nowrap; }
 @media (max-width:850px) {
   .toolbar-right { flex-wrap:wrap; }
+  .panel-toolbar { flex-wrap:wrap; }
 }
 @media (max-width:520px) {
   .manual-event-date-grid { grid-template-columns:1fr;gap:0; }
