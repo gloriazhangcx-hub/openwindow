@@ -23,6 +23,7 @@ import {
   getCalendarDayBlocks,
   getCalendarEventAccessibleLabel,
 } from "./lib/calendar-blocks";
+import { shouldShowMyEventsAttendanceControl } from "./lib/event-attendance";
 import { CalendarAttendanceMarker } from "./components/CalendarAttendanceMarker";
 import { ManualEventDialog } from "./components/ManualEventDialog";
 import {
@@ -408,7 +409,7 @@ function App() {
                       availability={model.availabilityByEvent[event.id] ?? "unknown"}
                       starred={model.starredEventIds.includes(event.id)}
                       onStar={event.source === "Manual" ? undefined : () => starEvent(event)}
-                      attendance={myEventsOnly && model.starredEventIds.includes(event.id) ? {
+                      attendance={shouldShowMyEventsAttendanceControl(event, myEventsOnly, model.starredEventIds) ? {
                         eventId: event.id,
                         eventTitle: event.title,
                         status: model.attendanceByEventId[event.id] ?? "interested",

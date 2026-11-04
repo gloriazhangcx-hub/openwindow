@@ -38,3 +38,9 @@ The goal is to verify and strengthen what already exists, not to build duplicate
 - Server reads and writes derive the account from the verified Clerk session. Unstar removes only the Star relationship and never targets `manual_events`.
 - Tests cover sign-in migration idempotency, Star/Unstar, persisted attendance after reload, cross-account isolation, conflict-safe data migration, manual-event survival, route validation, and collection filtering.
 - Development database identity was confirmed as `heliumdb`; integration tests use disposable `test_` accounts and clean them up. No production migration or deployment is performed.
+
+## Follow-up regression review
+
+- Review of PR #20 found that the My Events list supplied attendance controls only to Starred suggestions, omitting manual events even though My Events intentionally includes them without a Star.
+- Restored the attendance control for manual-event rows in My Events while keeping list controls scoped to My Events and preserving the existing manual-event status update handler.
+- Added regression tests for unstarred manual events, starred/unstarred suggestions, and the Full Discover boundary.
