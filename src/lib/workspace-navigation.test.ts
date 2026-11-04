@@ -35,8 +35,12 @@ test("primary navigation renders three equally styled choices with one active st
     assert.equal(buttonCount, 3);
     assert.equal(selectedCount, 1);
     assert.match(markup, />Discover<\/span>/);
-    assert.match(markup, />Calendar<\/span>/);
     assert.match(markup, />My Events<\/span>/);
+    assert.match(markup, />Calendar<\/span>/);
+    const discoverPosition = markup.indexOf(">Discover</span>");
+    const myEventsPosition = markup.indexOf(">My Events</span>");
+    const calendarPosition = markup.indexOf(">Calendar</span>");
+    assert.ok(discoverPosition < myEventsPosition && myEventsPosition < calendarPosition);
     assert.match(markup, /class="view-tab-count"/);
     assert.doesNotMatch(markup, />List<\/span>|my-events-toggle|Full Discover/);
     assert.match(markup, new RegExp(`aria-label="${activeTab === "my-events" ? "My Events, 4 events" : activeTab === "calendar" ? "Calendar" : "Discover"}"`));

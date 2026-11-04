@@ -9,8 +9,8 @@ type PrimaryNavigationProps = {
 
 const tabs: { id: WorkspaceTab; label: string; Icon: typeof LayoutList }[] = [
   { id: "discover", label: "Discover", Icon: LayoutList },
-  { id: "calendar", label: "Calendar", Icon: CalendarDays },
   { id: "my-events", label: "My Events", Icon: Star },
+  { id: "calendar", label: "Calendar", Icon: CalendarDays },
 ];
 
 export function PrimaryNavigation({ activeTab, eventCount, onSelect }: PrimaryNavigationProps) {
