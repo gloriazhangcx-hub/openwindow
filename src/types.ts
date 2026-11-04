@@ -41,6 +41,7 @@ export interface EventItem {
   formats: Format[];
   source: "Demo" | "Luma" | "Manual";
   lumaUrl: string;
+  sourceUrl?: string;
   location?: string;
   eventUrl?: string;
 }

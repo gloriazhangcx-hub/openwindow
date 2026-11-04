@@ -35,6 +35,7 @@ import { CalendarAttendanceMarker } from "./components/CalendarAttendanceMarker"
 import { ManualEventDialog } from "./components/ManualEventDialog";
 import { DiscoverSummaryStrip, MyEventsDashboard } from "./components/CompactDashboard";
 import { PrimaryNavigation } from "./components/PrimaryNavigation";
+import { LumaEventLink } from "./components/LumaEventLink";
 import {
   ATTENDANCE_STATUSES,
   ATTENDANCE_STATUS_LABELS,
@@ -835,6 +836,7 @@ function EventModal({ event, availability, starred, attendance, onStar, onEdit, 
         </div>
         <div className="modal-actions">
           <button className="button primary" onClick={() => downloadIcs(event)}><Download size={14} /> Download .ics</button>
+          <LumaEventLink event={event} />
           {event.source === "Manual" ? (
             <>
               <button className="button secondary" type="button" onClick={onEdit}><Pencil size={14} /> Edit event</button>
@@ -853,7 +855,6 @@ function EventModal({ event, availability, starred, attendance, onStar, onEdit, 
               {onStar && <button className="button secondary" onClick={onStar} aria-pressed={starred}><Star size={14} fill={starred ? "currentColor" : "none"} /> {starred ? "In My Events" : "Star event"}</button>}
             </>
           )}
-          {event.source === "Luma" && event.lumaUrl !== "https://lu.ma" && <a className="external-link" href={event.lumaUrl} target="_blank" rel="noreferrer">Open on Luma <ExternalLink size={13} /></a>}
           {event.source === "Manual" && event.eventUrl && <a className="external-link" href={event.eventUrl} target="_blank" rel="noreferrer">Open event link <ExternalLink size={13} /></a>}
         </div>
         <p className="filter-note" style={{ marginTop: 12 }}>Download the calendar file to add this event yourself.</p>

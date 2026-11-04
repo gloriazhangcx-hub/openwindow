@@ -151,6 +151,7 @@ h1,h2,h3,p { margin-top:0; }
 .button.primary:hover { background:#40316f;transform:translateY(-1px);box-shadow:0 5px 15px #51408030; }
 .button.secondary { background:#f6f2fa;border:1px solid #e0d8ed;color:#514080; }
 .button.secondary:hover { background:#eee9f6; }
+.luma-event-button { text-decoration:none;white-space:nowrap; }
 .button.danger { background:#fbefec;border:1px solid #efd4cd;color:#b35e50; }
 .footer-note { display:flex;justify-content:space-between;gap:16px;margin-top:17px;color:#929c93;font-size:10px; }
 .calendar-wrap { padding:18px;overflow-x:auto; }
