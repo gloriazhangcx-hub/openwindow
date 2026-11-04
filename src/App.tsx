@@ -17,6 +17,7 @@ import {
 } from "./lib/calendar-views";
 import { findNearestUpcomingEvent } from "./lib/saved-events";
 import { filterEvents } from "./lib/event-filtering";
+import { sortEventsByStart, type EventSortOrder } from "./lib/event-sorting";
 import {
   countCalendarBusyIntervalsForDay,
   getCalendarAttendanceStatus,
@@ -124,6 +125,7 @@ function App() {
   const [selectedTopics, setSelectedTopics] = useState<Topic[]>(model.preferences.topics);
   const [selectedFormats, setSelectedFormats] = useState<Format[]>(model.preferences.formats);
   const [availabilityFilter, setAvailabilityFilter] = useState<AvailabilityFilter>("all");
+  const [dateSortOrder, setDateSortOrder] = useState<EventSortOrder>("soonest");
   const [searchQuery, setSearchQuery] = useState("");
   const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<AttendanceStatusFilter>("all");
   const [myEventsOnly, setMyEventsOnly] = useState(false);
@@ -173,14 +175,21 @@ function App() {
     myEventsOnly,
   }), [eventsForView, model.preferences, model.availabilityByEvent, model.attendanceByEventId, model.starredEventIds, selectedTopics, selectedFormats, availabilityFilter, searchQuery, attendanceStatusFilter, myEventsOnly]);
 
+  const listEvents = useMemo(
+    () => view === "list" && !myEventsOnly
+      ? sortEventsByStart(filteredEvents, dateSortOrder)
+      : filteredEvents,
+    [filteredEvents, dateSortOrder, myEventsOnly, view],
+  );
+
   const dateGroups = useMemo(() => {
     const groups = new Map<string, EventItem[]>();
-    filteredEvents.forEach((event) => {
+    listEvents.forEach((event) => {
       const key = dayKey(safeDate(event.start), event.timeZone);
       groups.set(key, [...(groups.get(key) ?? []), event]);
     });
     return [...groups.entries()];
-  }, [filteredEvents]);
+  }, [listEvents]);
 
   const calendarDays = useMemo(
     () => getCalendarViewDays(calendarDate, calendarMode),
@@ -356,6 +365,19 @@ function App() {
                 <button role="tab" aria-selected={view === "calendar"} className={view === "calendar" ? "selected" : ""} onClick={openCalendar}><CalendarDays size={15} /> Calendar</button>
               </div>
               <div className="toolbar-right">
+                {view === "list" && !myEventsOnly && (
+                  <label className="list-sort-control">
+                    <span>Sort</span>
+                    <select
+                      aria-label="Sort events by date"
+                      value={dateSortOrder}
+                      onChange={(event) => setDateSortOrder(event.target.value as EventSortOrder)}
+                    >
+                      <option value="soonest">Date: Soonest first</option>
+                      <option value="latest">Date: Latest first</option>
+                    </select>
+                  </label>
+                )}
                 <button
                   className={`my-events-toggle ${myEventsOnly ? "active" : ""}`}
                   aria-pressed={myEventsOnly}
