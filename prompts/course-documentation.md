@@ -14,7 +14,7 @@ Complete the course-facing documentation using the shipped OpenWindow code and v
 
 ## Requested changes
 
-1. Create `docs/schema.md` from the Drizzle declarations and migration code. Explain the actual tables, keys, ownership, constraints, and the difference between active `stars` and compatibility `saved_events`.
+1. Create a root-level `schema.md` from the Drizzle declarations and migration code. Explain the actual tables, keys, ownership, constraints, and the difference between active `stars` and compatibility `saved_events`.
 2. Update `README.md` to describe the current app, production URL, local setup, auth/database behavior, features, and verified limits of Luma and calendar integrations.
 3. Complete the Plan vs. Reality section in `PLAN.md`, keeping the original product scope and clearly recording shipped work, changed scope, deferred work, and evidence.
 4. Check the four existing RED/GREEN test-evidence images against their filenames, test names, commands, and described outputs. Verify merged PR history from GitHub rather than assuming it from local commit order.
