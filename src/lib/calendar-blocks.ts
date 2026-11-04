@@ -5,7 +5,7 @@ import {
   type BusyInterval,
   type EventItem,
 } from "../types";
-import { clipIntervalToCalendarDay } from "./calendar-grid";
+import { clipIntervalToCalendarDay } from "./calendar-grid-layout";
 
 export type CalendarEventBlock = {
   kind: "event";

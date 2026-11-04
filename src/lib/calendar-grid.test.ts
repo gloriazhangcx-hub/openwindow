@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { clipIntervalToCalendarDay, getCalendarDayBounds, getVisibleMinuteRange } from "./calendar-grid";
+import { clipIntervalToCalendarDay, getCalendarDayBounds, getVisibleMinuteRange } from "./calendar-grid-layout";
 
 test("calendar grid positions evening events using the full 24-hour day", () => {
   const range = getVisibleMinuteRange(

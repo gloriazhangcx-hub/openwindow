@@ -144,3 +144,7 @@ Please complete as much as safely possible while I'm offline and leave the new P
 ## Existing PR #18 — Calendar visibility and header correction
 
 I manually tested the Personal Event CRUD feature and found two Calendar UI bugs. Update the existing PR #18 only; do not create another Issue or PR. Extend Day and Week Calendar to cover the full day, with the initial scroll position at approximately 8 AM and vertical scrolling available for early-morning and late-night events. Position event blocks by their actual start and end times, do not clip late events, and split events crossing midnight into the correct daily segments. Fix Week date headers so weekday labels remain above date numbers in all columns; preserve today's purple circle. Keep Month view, event colors, conflicts, attendance markers, existing commitments, and responsive layout intact. Add focused regression tests, run the complete suite, typecheck, and build. Do not merge or deploy; preserve the prototype and draft PR #8.
+
+## Existing PR #18 — Blank Preview cache recovery
+
+When opening the updated Preview, the browser remained blank because it requested a stale immutable Vite module URL for the changed calendar helper. Move the helper to a new module path and update all imports so browsers fetch a fresh module. Verify the transformed module export, inspect browser logs, and confirm the updated Preview renders. Do not change feature behavior or merge/deploy.

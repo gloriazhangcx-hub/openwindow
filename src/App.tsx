@@ -8,7 +8,7 @@ import { useClerk, useUser } from "@clerk/react";
 import { Link } from "wouter";
 import { basePath } from "./lib/clerk-config";
 import { useOpenWindow } from "./lib/useOpenWindow";
-import { clipIntervalToCalendarDay, getVisibleMinuteRange } from "./lib/calendar-grid";
+import { clipIntervalToCalendarDay, getVisibleMinuteRange } from "./lib/calendar-grid-layout";
 import {
   atCalendarNoon,
   getCalendarViewDays,
